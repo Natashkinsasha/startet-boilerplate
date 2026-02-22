@@ -50,9 +50,15 @@ starter-boilerplate/
 │   │   ├── server/
 │   │   │   └── setup.go     # SetupMux() → *http.ServeMux; SetupHTTPServer() → *http.Server
 │   │   ├── huma/
-│   │   │   └── setup.go     # Setup(*http.ServeMux, AppConfig) → huma.API
+│   │   │   ├── setup.go     # Setup(*http.ServeMux, AppConfig) → huma.API
+│   │   │   └── spec.go      # GenerateSpecFile(huma.API) — writes docs/swagger.json
 │   │   ├── middleware/
-│   │   │   └── setup.go     # Setup(*http.Server, huma.API, *jwt.Manager) → Init
+│   │   │   ├── setup.go     # Setup(*http.Server, huma.API, *jwt.Manager) → Init
+│   │   │   ├── auth.go      # NewAuthMiddleware — Bearer token validation
+│   │   │   ├── role.go      # NewRoleMiddleware — role-based access control
+│   │   │   ├── limiter.go   # NewLimiterMiddleware — per-IP rate limiting
+│   │   │   ├── logger.go    # newLoggerMiddleware — request logging
+│   │   │   └── requestid.go # NewRequestIDMiddleware — X-Request-ID header
 │   │   ├── logger/
 │   │   │   └── logger.go    # LoggerConfig; SetupLogger(LoggerConfig) → *zap.Logger
 │   │   ├── jwt/
@@ -65,23 +71,25 @@ starter-boilerplate/
 │   └── user/                # subdomain (user + auth combined)
 │       ├── domain/
 │       │   ├── model/
-│       │   │   └── user.go          # User, TokenPair
+│       │   │   └── user.go          # User, TokenPair, Role
 │       │   └── repository/
 │       │       └── user.go          # UserRepository (interface)
 │       ├── app/
-│       │   └── service/
-│       │       └── auth.go          # AuthService struct
+│       │   ├── service/
+│       │   │   ├── user.go          # UserService interface + impl
+│       │   │   └── token.go         # TokenService interface + impl
+│       │   └── usecase/
+│       │       ├── login.go         # LoginUseCase — orchestrates login flow
+│       │       └── refresh.go       # RefreshUseCase — orchestrates token refresh
 │       ├── transport/
 │       │   ├── handler/
-│       │   │   └── auth/
-│       │   │       ├── handler.go   # Handler struct, SetupHandler()
-│       │   │       ├── login.go     # registerLogin(), login()
-│       │   │       ├── refresh.go   # registerRefresh(), refresh()
-│       │   │       └── types.go     # tokenBody, tokenOutput
+│       │   │   ├── setup.go         # SetupHandlers() — registers all HTTP routes
+│       │   │   ├── login.go         # LoginHandler (POST /api/v1/auth/login)
+│       │   │   ├── refresh.go       # RefreshHandler (POST /api/v1/auth/refresh)
+│       │   │   ├── get_user.go      # GetUserHandler (GET /api/v1/users/{id})
+│       │   │   └── types.go         # TokenBody, tokenOutput
 │       │   └── contract/
-│       │       └── user/
-│       │           ├── contract.go  # Contract struct, SetupContract()
-│       │           └── get_user.go  # GetUser()
+│       │       └── user.go          # gRPC Contract, SetupUserContract(), GetUser()
 │       ├── infra/
 │       │   └── persistence/
 │       │       └── user.go          # userRepository — implements UserRepository
@@ -91,18 +99,33 @@ starter-boilerplate/
 ├── pkg/                     # reusable code, no dependency on internal/
 │   ├── jwt/
 │   │   └── manager.go       # Manager, Claims, Config; token generation and validation
-│   └── logger/
-│       └── setup.go         # Logger (= zap.Logger); SetupLogger(format, level); NewNop()
+│   ├── logger/
+│   │   └── setup.go         # Logger (= zap.Logger); SetupLogger(format, level, stacktraceLevel); NewNop()
+│   └── testcontainer/
+│       ├── setup.go          # TestMain-level setup helpers
+│       ├── container.go      # Container interface
+│       ├── container_manager.go # ContainerManager — lifecycle management
+│       ├── pg_container.go   # PostgreSQL testcontainer
+│       └── redis_container.go # Redis testcontainer
 │
 ├── proto/                   # Protobuf definitions (.proto files)
 ├── gen/                     # generated code from proto (DO NOT edit)
 ├── migrations/              # SQL migrations (bun/migrate)
 │   ├── embed.go             # //go:embed *.sql → var Migrations
 │   └── *.sql                # {timestamp}_{name}.up.sql / .down.sql
+├── tests/
+│   ├── functional/
+│   │   ├── api_test.go      # E2E tests — API endpoints
+│   │   ├── auth_test.go     # E2E tests — auth flow
+│   │   ├── user_test.go     # E2E tests — user endpoints
+│   │   └── testdata/fixtures/users.yml
+│   └── suite/
+│       └── functional_suite.go  # shared test suite setup
 ├── env/
 │   ├── .env.yaml            # base values
 │   ├── .env.{APP_ENV}.yaml  # environment override (loaded if APP_ENV is set)
-│   └── .env.standalone.yaml # standalone mode (DB/Redis disabled)
+│   ├── .env.standalone.yaml # standalone mode (DB/Redis disabled)
+│   └── .env.test.yaml       # test environment config
 ├── docker-compose.yml
 ├── Makefile
 └── go.mod                   # module: starter-boilerplate
@@ -115,8 +138,8 @@ starter-boilerplate/
 ### Subdomain layers
 
 ```
-transport/handler  →  app/service  ←  infra/persistence
-        ↓                  ↓                   ↓
+transport/handler  →  app/usecase  →  app/service  ←  infra/persistence
+        ↓                  ↓               ↓                   ↓
    domain/repository  (interfaces)    domain/model (entities)
 ```
 
@@ -124,8 +147,10 @@ transport/handler  →  app/service  ←  infra/persistence
 |-------------------|------------------------|----------------------------------------------------|
 | Entities / DTOs   | `domain/model`         | nothing external                                   |
 | Interfaces        | `domain/repository`    | `domain/model`                                     |
-| Business logic    | `app/service`          | `domain/repository`, `domain/model`, `pkg/jwt`     |
-| HTTP handlers     | `transport/handler`    | `domain/repository`, `domain/model`                |
+| Services          | `app/service`          | `domain/repository`, `domain/model`, `pkg/jwt`     |
+| Use cases         | `app/usecase`          | `app/service`, `domain/model`                      |
+| HTTP handlers     | `transport/handler`    | `app/usecase`, `app/service`                       |
+| gRPC contracts    | `transport/contract`   | `domain/repository`, `domain/model`                |
 | Repository impl   | `infra/persistence`    | `domain/repository`, `domain/model`, `bun`         |
 
 ### Package naming
@@ -136,8 +161,9 @@ Each package is named after its directory — no aliases needed:
 internal/user/domain/model/            → package model
 internal/user/domain/repository/       → package repository
 internal/user/app/service/             → package service
-internal/user/transport/handler/auth/  → package auth
-internal/user/transport/contract/user/ → package user
+internal/user/app/usecase/             → package usecase
+internal/user/transport/handler/       → package handler
+internal/user/transport/contract/      → package contract
 internal/user/infra/persistence/       → package persistence
 ```
 
@@ -146,6 +172,7 @@ import (
     "starter-boilerplate/internal/user/domain/model"
     "starter-boilerplate/internal/user/domain/repository"
     "starter-boilerplate/internal/user/app/service"
+    "starter-boilerplate/internal/user/app/usecase"
     "starter-boilerplate/internal/user/infra/persistence"
 )
 ```
@@ -156,7 +183,7 @@ import (
 |----------------------|--------------------------------------------------|-------------------|
 | `New...`             | Pure constructor, only creates an object         | yes, if needed    |
 | `Setup...`           | Creates object + invokes methods (side effects)  | **no — panic**    |
-| `Initialize...Module`| Wire injector — wires subdomain dependencies     | yes               |
+| `Initialize...Module`| Wire injector — wires subdomain dependencies     | no                |
 
 **`Setup*` never returns an error** — on critical failure it calls `panic`.
 
@@ -165,6 +192,12 @@ import (
 Repository implementations in `infra/` are **unexported**:
 ```go
 type userRepository struct{ db *bun.DB }  // infra/persistence
+```
+
+Service implementations are **unexported**, interfaces are **exported**:
+```go
+type UserService interface { ... }     // exported interface
+type userService struct{ ... }         // unexported implementation
 ```
 
 Constructors (`New...`) are **exported** — required by Wire.
@@ -177,27 +210,33 @@ type tokenType string                    // used only inside pkg/jwt
 
 ### Handlers
 
-Each handler group is a separate package (e.g. `transport/handler/auth/`).
-One file = one endpoint (input type, registration, handler method).
+Each handler is a separate struct in the `transport/handler/` package.
+One file = one endpoint (input type, handler struct, registration, handler method).
 
-`SetupHandler(api, ...)` creates the handler and registers all routes:
+`SetupHandlers(api, ...)` accepts all handlers and registers their routes:
 ```go
-// handler.go
-func SetupHandler(api huma.API, as *service.AuthService) *Handler {
-    h := &Handler{as: as}
-    h.registerLogin(api)
-    h.registerRefresh(api)
-    return h
+// setup.go
+func SetupHandlers(api huma.API, loginH *LoginHandler, refreshH *RefreshHandler, getUserH *GetUserHandler) HandlersInit {
+    loginH.Register(api)
+    refreshH.Register(api)
+    getUserH.Register(api)
+    return HandlersInit{}
 }
 
 // login.go
-func (h *Handler) registerLogin(api huma.API) {
-    huma.Register(api, huma.Operation{...}, h.login)
+type LoginHandler struct {
+    loginUC *usecase.LoginUseCase
 }
 
-func (h *Handler) login(ctx context.Context, input *loginInput) (*tokenOutput, error) { ... }
+func NewLoginHandler(loginUC *usecase.LoginUseCase) *LoginHandler
+
+func (h *LoginHandler) Register(api huma.API) {
+    huma.Register(api, huma.Operation{...}, h.handle)
+}
+
+func (h *LoginHandler) handle(ctx context.Context, input *loginInput) (*tokenOutput, error) { ... }
 ```
-HTTP methods (`login`, `refresh`) and registration methods are **unexported**.
+Handler methods (`handle`) are **unexported**. Each handler has an exported `Register` method.
 
 ---
 
@@ -282,8 +321,9 @@ type JWTConfig struct {
 ```go
 // internal/shared/logger/logger.go
 type LoggerConfig struct {
-    Format string `yaml:"format"` // "json" | "console"
-    Level  string `yaml:"level"`  // "debug" | "info" | "warn" | "error"
+    Format          string `yaml:"format"`           // "json" | "console"
+    Level           string `yaml:"level"`            // "debug" | "info" | "warn" | "error"
+    StacktraceLevel string `yaml:"stacktrace_level"` // "debug" | "info" | "warn" | "error" | "off"
 }
 ```
 
@@ -362,7 +402,7 @@ func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *zap.Logg
     return app.New(httpSrv, cfg, grpcSrv, api)
 }
 
-func InitializeApp(ctx context.Context) (*app.App, error) {
+func InitializeApp(ctx context.Context) *app.App {
     wire.Build(
         config.SetupConfig,
         logger.SetupLogger,
@@ -380,7 +420,7 @@ func InitializeApp(ctx context.Context) (*app.App, error) {
 
         newApp,
     )
-    return nil, nil
+    return nil
 }
 ```
 
@@ -399,26 +439,33 @@ func InitializeApp(ctx context.Context) (*app.App, error) {
 
 package user
 
-type module struct{} // Wire marker: all handlers have been set up
+type Module struct{} // Wire marker: all handlers have been set up
 
-func initModule(_ *auth.Handler, _ *usercontract.Contract) module {
-    return module{}
+func NewModule(_ handler.HandlersInit, _ usercontract.Init) Module {
+    return Module{}
 }
 
-func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *gogrpc.Server, jwtCfg sharedjwt.JWTConfig) (module, error) {
+func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *gogrpc.Server, jwtManager *pkgjwt.Manager, _ sharedmw.Init) Module {
     wire.Build(
-        sharedjwt.NewJWTManager,
         persistence.NewUserRepository,
-        service.NewAuthService,
-        auth.SetupHandler,
-        usercontract.SetupContract,
-        initModule,
+        service.NewUserService,
+        service.NewTokenService,
+        usecase.NewLoginUseCase,
+        usecase.NewRefreshUseCase,
+        handler.NewLoginHandler,
+        handler.NewRefreshHandler,
+        handler.NewGetUserHandler,
+        handler.SetupHandlers,
+        usercontract.SetupUserContract,
+        NewModule,
     )
-    return module{}, nil
+    return Module{}
 }
 ```
 
-`initModule` is a Wire dependency sink — it ensures all handlers are created. `SetupHandler` and `SetupContract` register routes during construction.
+`NewModule` is a Wire dependency sink — it ensures all handlers and contracts are created. `SetupHandlers` and `SetupUserContract` register routes during construction.
+
+`InitializeUserModule` accepts `_ sharedmw.Init` to guarantee middleware is installed before handlers are registered.
 
 ### Code generation
 
@@ -449,9 +496,10 @@ type Config struct {
 }
 
 type Claims struct {
-    UserID string `json:"user_id"`
+    UserID    string    `json:"user_id"`
+    Role      string    `json:"role"`
+    TokenType tokenType `json:"token_type"` // unexported type — internal detail
     jwt.RegisteredClaims
-    // tokenType — unexported field, internal implementation detail
 }
 
 type Manager struct{ cfg Config }
@@ -459,8 +507,8 @@ type Manager struct{ cfg Config }
 func NewManager(cfg Config) *Manager
 
 // Generation
-func (m *Manager) GenerateAccessToken(userID string) (string, error)
-func (m *Manager) GenerateRefreshToken(userID string) (string, error)
+func (m *Manager) GenerateAccessToken(userID, role string) (string, error)
+func (m *Manager) GenerateRefreshToken(userID, role string) (string, error)
 
 // Validation
 func (m *Manager) ValidateAccessToken(tokenStr string) (*Claims, error)
@@ -468,7 +516,7 @@ func (m *Manager) ValidateRefreshToken(tokenStr string) (*Claims, error)
 ```
 
 Internal details (`tokenType`, constants `accessToken`/`refreshToken`) are unexported.
-The public API is limited to `Manager`, `Claims`, and their methods.
+The public API is limited to `Manager`, `Claims`, `Config`, and their methods.
 
 ---
 
@@ -479,7 +527,7 @@ Thin wrapper over `go.uber.org/zap`.
 ```go
 type Logger = zap.Logger  // type alias, not a new type
 
-func SetupLogger(format, level string) *Logger
+func SetupLogger(format, level, stacktraceLevel string) *Logger
 func NewNop() *Logger  // for tests
 ```
 
@@ -488,6 +536,11 @@ func NewNop() *Logger  // for tests
 - anything else → `zap.NewDevelopmentConfig()` with colour output (default level: `debug`)
 
 `level` overrides the format default. An invalid value is silently ignored.
+
+`stacktraceLevel` controls which log levels include stacktraces:
+- `"off"` → disables stacktraces entirely
+- `""` (empty) → keeps format defaults
+- `"warn"`, `"error"`, etc. → sets custom stacktrace threshold
 
 ---
 
@@ -537,24 +590,70 @@ type UserRepository interface {
 
 ### app/service
 
+Two interfaces, each with an unexported implementation:
+
 ```go
-// internal/user/app/service/auth.go
+// internal/user/app/service/user.go
 package service
 
-type AuthService struct {
-    userRepo   repository.UserRepository
-    jwtManager *jwt.Manager
+type UserService interface {
+    FindByEmail(ctx context.Context, email string) (*model.User, error)
+    FindByID(ctx context.Context, id string) (*model.User, error)
+    CheckPassword(passwordHash, password string) error
 }
 
-func NewAuthService(userRepo repository.UserRepository, jwtManager *jwt.Manager) *AuthService
+func NewUserService(userRepo repository.UserRepository) UserService
 ```
 
-`Login(ctx, email, password)` flow:
-1. `FindByEmail(ctx, email)` — check the user exists
-2. `bcrypt.CompareHashAndPassword` — verify password
-3. `issueTokenPair` — generate access + refresh tokens
+```go
+// internal/user/app/service/token.go
+package service
 
-All methods accept `context.Context` — propagated from transport layer through service to repository for request cancellation support.
+type TokenService interface {
+    IssueTokenPair(userID, role string) (*model.TokenPair, error)
+    ValidateRefreshToken(token string) (*jwt.Claims, error)
+}
+
+func NewTokenService(jwtManager *jwt.Manager) TokenService
+```
+
+### app/usecase
+
+Use cases orchestrate services. Each use case is a single-purpose struct with an `Execute` method.
+
+```go
+// internal/user/app/usecase/login.go
+package usecase
+
+type LoginUseCase struct {
+    userService  service.UserService
+    tokenService service.TokenService
+}
+
+func NewLoginUseCase(us service.UserService, ts service.TokenService) *LoginUseCase
+```
+
+`Execute(ctx, email, password)` flow:
+1. `userService.FindByEmail(ctx, email)` — find user
+2. `userService.CheckPassword(passwordHash, password)` — verify password via bcrypt
+3. `tokenService.IssueTokenPair(userID, role)` — generate access + refresh tokens
+
+```go
+// internal/user/app/usecase/refresh.go
+package usecase
+
+type RefreshUseCase struct {
+    userService  service.UserService
+    tokenService service.TokenService
+}
+
+func NewRefreshUseCase(us service.UserService, ts service.TokenService) *RefreshUseCase
+```
+
+`Execute(ctx, refreshToken)` flow:
+1. `tokenService.ValidateRefreshToken(refreshToken)` — validate and extract claims
+2. `userService.FindByID(ctx, claims.UserID)` — verify user still exists
+3. `tokenService.IssueTokenPair(userID, role)` — issue new token pair
 
 ### infra/persistence
 
@@ -577,49 +676,73 @@ type userRepository struct{ db *bun.DB }  // unexported
 func NewUserRepository(db *bun.DB) repository.UserRepository
 ```
 
-### transport/handler/auth
+### transport/handler
 
 ```go
-// handler.go
-package auth
+// setup.go
+package handler
 
-type Handler struct {
-    as *service.AuthService
-}
+type HandlersInit struct{}
 
-func SetupHandler(api huma.API, as *service.AuthService) *Handler
+func SetupHandlers(api huma.API, loginH *LoginHandler, refreshH *RefreshHandler, getUserH *GetUserHandler) HandlersInit
 
-// login.go  — registerLogin(api), login(ctx, *loginInput) (*tokenOutput, error)
-// refresh.go — registerRefresh(api), refresh(ctx, *refreshInput) (*tokenOutput, error)
-// types.go  — tokenBody, tokenOutput
+// login.go   — LoginHandler, NewLoginHandler(), Register(api), handle(ctx, *loginInput)
+// refresh.go — RefreshHandler, NewRefreshHandler(), Register(api), handle(ctx, *refreshInput)
+// get_user.go — GetUserHandler, NewGetUserHandler(), Register(api), handle(ctx, *getUserInput)
+// types.go   — TokenBody, tokenOutput
 ```
 
-### transport/contract/user
+### transport/contract
 
 ```go
-// contract.go
-package user
+// user.go
+package contract
 
 type Contract struct {
-    contract.UnimplementedUserContractServer
-    repo repository.UserRepository
+    gen.UnimplementedUserContractServer
+    ur repository.UserRepository
 }
 
-func SetupContract(grpcSrv *grpc.Server, repo repository.UserRepository) *Contract
+type Init struct{}
 
-// get_user.go — GetUser(ctx, *GetUserRequest) (*GetUserResponse, error)
+func SetupUserContract(grpcSrv *grpc.Server, ur repository.UserRepository) Init
+
+// GetUser(ctx, *gen.GetUserRequest) (*gen.GetUserResponse, error)
 ```
 
-Request / response shapes:
+### HTTP endpoints
+
 ```
 POST /api/v1/auth/login
-  Body:     { "email": string, "password": string (minLength: 6) }
+  Body:     { "email": string (format: email), "password": string (minLength: 6) }
   Response: { "access_token": string, "refresh_token": string }
 
 POST /api/v1/auth/refresh
   Body:     { "refresh_token": string }
   Response: { "access_token": string, "refresh_token": string }
+
+GET /api/v1/users/{id}
+  Headers:  Authorization: Bearer <access_token>
+  Response: { "id": string, "email": string, "role": string }
+  Notes:    Admins can access any user; non-admins can only access their own profile
 ```
+
+---
+
+## Middleware
+
+Middleware is installed in `internal/shared/middleware/setup.go` in two layers:
+
+**Huma-level** (applied per-operation, outermost first):
+1. `RequestID` — generates/propagates `X-Request-ID` header
+2. `Logger` — logs request method, path, status, duration
+3. `Limiter` — per-IP rate limiting (100 req/min)
+4. `Auth` — validates Bearer token on endpoints with `bearerAuth` security
+5. `Role` — checks `requiredRoles` metadata on operations
+
+**HTTP-level** (wraps the entire `http.Handler`):
+- `WithCORS` — permissive CORS headers
+- `WithRecover` — panic recovery, returns 500 JSON
 
 ---
 
@@ -630,10 +753,7 @@ func main() {
     ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer stop()
 
-    app, err := internal.InitializeApp(ctx)
-    if err != nil {
-        panic("failed to initialize app: " + err.Error())
-    }
+    app := internal.InitializeApp(ctx)
 
     if err := app.Run(ctx); err != nil {
         zap.L().Fatal("server error", zap.Error(err))
@@ -663,11 +783,15 @@ Starts two services, both with healthchecks:
 
 ```bash
 make local-run        # APP_ENV=local go run ./cmd/api/...
+make dev              # air (live reload)
 make build            # go build -o bin/api ./cmd/api/...
 make wire             # wire gen ./...
 make swagger          # APP_ENV=standalone go run ./cmd/swagger/...
 make proto            # generate Go code from .proto files
 make lint             # golangci-lint run ./...
+make vet              # go vet with all build tags
+make deps             # go mod tidy
+make install-tools    # install wire, protoc-gen-go, golangci-lint, air
 make docker-up        # docker-compose up -d
 make docker-down      # docker-compose down
 make test-unit        # unit tests only
@@ -764,7 +888,7 @@ cmd/migrate/
 └── main.go                               # CLI: init, migrate, rollback, status, create
 ```
 
-`cmd/migrate` is a standalone binary — it initializes only config, logger, and DB (no Wire, no Fiber/gRPC/Redis).
+`cmd/migrate` is a standalone binary — it initializes only config, logger, and DB (no Wire, no HTTP/gRPC/Redis).
 
 ### Usage
 
@@ -827,10 +951,11 @@ proto/{subdomain}/{subdomain}.proto   →   gen/{subdomain}/*.pb.go
    │   ├── model/          # package model — entities
    │   └── repository/     # package repository — interfaces
    ├── app/
-   │   └── service/        # package service — business logic
+   │   ├── service/        # package service — interfaces + implementations
+   │   └── usecase/        # package usecase — orchestration logic
    ├── transport/
-   │   ├── handler/{xxx}/  # package {xxx} — HTTP handlers (one package per handler group)
-   │   └── contract/{xxx}/ # package {xxx} — gRPC contracts
+   │   ├── handler/        # package handler — HTTP handlers (one struct per endpoint)
+   │   └── contract/       # package contract — gRPC contracts
    ├── infra/
    │   └── persistence/    # package persistence — repository implementation
    ├── initialize.go       # //go:build wireinject — InitializeXxxModule
