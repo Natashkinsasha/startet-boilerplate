@@ -1,8 +1,7 @@
 package service
 
 import (
-	"errors"
-
+	apperror "starter-boilerplate/internal/shared/error"
 	"starter-boilerplate/internal/user/domain/model"
 	"starter-boilerplate/pkg/jwt"
 )
@@ -40,7 +39,7 @@ func (s *tokenService) IssueTokenPair(userID, role string) (*model.TokenPair, er
 func (s *tokenService) ValidateRefreshToken(token string) (*jwt.Claims, error) {
 	claims, err := s.jwtManager.ValidateRefreshToken(token)
 	if err != nil {
-		return nil, errors.New("invalid refresh token")
+		return nil, apperror.ErrInvalidToken
 	}
 	return claims, nil
 }

@@ -31,3 +31,12 @@ func (m *UserService) FindByID(ctx context.Context, id string) (*model.User, err
 func (m *UserService) CheckPassword(passwordHash, password string) error {
 	return m.Called(passwordHash, password).Error(0)
 }
+
+func (m *UserService) Create(ctx context.Context, user *model.User) error {
+	return m.Called(ctx, user).Error(0)
+}
+
+func (m *UserService) HashPassword(password string) (string, error) {
+	args := m.Called(password)
+	return args.String(0), args.Error(1)
+}

@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"errors"
 
+	apperror "starter-boilerplate/internal/shared/error"
 	"starter-boilerplate/internal/user/domain/model"
 	"starter-boilerplate/internal/user/domain/repository"
 
@@ -14,6 +14,8 @@ type UserService interface {
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	FindByID(ctx context.Context, id string) (*model.User, error)
 	CheckPassword(passwordHash, password string) error
+	Create(ctx context.Context, user *model.User) error
+	HashPassword(password string) (string, error)
 }
 
 type userService struct {
@@ -34,7 +36,19 @@ func (s *userService) FindByID(ctx context.Context, id string) (*model.User, err
 
 func (s *userService) CheckPassword(passwordHash, password string) error {
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
-		return errors.New("invalid credentials")
+		return apperror.ErrInvalidCredentials
 	}
 	return nil
+}
+
+func (s *userService) HashPassword(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+func (s *userService) Create(ctx context.Context, user *model.User) error {
+	return s.userRepo.Create(ctx, user)
 }

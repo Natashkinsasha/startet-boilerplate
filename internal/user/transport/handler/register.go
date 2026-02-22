@@ -10,33 +10,33 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
-type loginInput struct {
+type registerInput struct {
 	Body struct {
 		Email    string `json:"email" required:"true" format:"email"`
 		Password string `json:"password" required:"true" minLength:"6"`
 	}
 }
 
-type LoginHandler struct {
-	loginUC *usecase.LoginUseCase
+type RegisterHandler struct {
+	registerUC *usecase.RegisterUseCase
 }
 
-func NewLoginHandler(loginUC *usecase.LoginUseCase) *LoginHandler {
-	return &LoginHandler{loginUC: loginUC}
+func NewRegisterHandler(registerUC *usecase.RegisterUseCase) *RegisterHandler {
+	return &RegisterHandler{registerUC: registerUC}
 }
 
-func (h *LoginHandler) Register(api huma.API) {
+func (h *RegisterHandler) Register(api huma.API) {
 	huma.Register(api, huma.Operation{
-		OperationID: "auth-login",
+		OperationID: "auth-register",
 		Method:      http.MethodPost,
-		Path:        "/api/v1/auth/login",
-		Summary:     "Login",
+		Path:        "/api/v1/auth/register",
+		Summary:     "Register",
 		Tags:        []string{"auth"},
 	}, h.handle)
 }
 
-func (h *LoginHandler) handle(ctx context.Context, input *loginInput) (*tokenOutput, error) {
-	pair, err := h.loginUC.Execute(ctx, input.Body.Email, input.Body.Password)
+func (h *RegisterHandler) handle(ctx context.Context, input *registerInput) (*tokenOutput, error) {
+	pair, err := h.registerUC.Execute(ctx, input.Body.Email, input.Body.Password)
 	if err != nil {
 		return nil, err
 	}

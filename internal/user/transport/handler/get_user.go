@@ -4,8 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"starter-boilerplate/internal/shared/middleware"
-	"starter-boilerplate/internal/user/app/service"
+	"starter-boilerplate/internal/user/app/usecase"
 	"starter-boilerplate/internal/user/transport/dto"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -22,11 +21,11 @@ type getUserOutput struct {
 }
 
 type GetUserHandler struct {
-	userService service.UserService
+	uc *usecase.GetUserUseCase
 }
 
-func NewGetUserHandler(userService service.UserService) *GetUserHandler {
-	return &GetUserHandler{userService: userService}
+func NewGetUserHandler(uc *usecase.GetUserUseCase) *GetUserHandler {
+	return &GetUserHandler{uc: uc}
 }
 
 func (h *GetUserHandler) Register(api huma.API) {
@@ -43,18 +42,9 @@ func (h *GetUserHandler) Register(api huma.API) {
 }
 
 func (h *GetUserHandler) handle(ctx context.Context, input *getUserInput) (*getUserOutput, error) {
-	claims := middleware.ClaimsFromContext(ctx)
-
-	if claims.Role != "admin" && claims.UserID != input.ID {
-		return nil, huma.Error403Forbidden("access denied")
-	}
-
-	u, err := h.userService.FindByID(ctx, input.ID)
+	u, err := h.uc.Execute(ctx, input.ID)
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to fetch user")
-	}
-	if u == nil {
-		return nil, huma.Error404NotFound("user not found")
+		return nil, err
 	}
 
 	out := &getUserOutput{}

@@ -37,7 +37,7 @@ func (h *RefreshHandler) Register(api huma.API) {
 func (h *RefreshHandler) handle(ctx context.Context, input *refreshInput) (*tokenOutput, error) {
 	pair, err := h.refreshUC.Execute(ctx, input.Body.RefreshToken)
 	if err != nil {
-		return nil, huma.Error401Unauthorized(err.Error())
+		return nil, err
 	}
 
 	return &tokenOutput{Body: dto.NewTokenPairDTO(pair)}, nil

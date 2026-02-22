@@ -2,8 +2,8 @@ package usecase
 
 import (
 	"context"
-	"errors"
 
+	apperror "starter-boilerplate/internal/shared/error"
 	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/internal/user/domain/model"
 )
@@ -26,7 +26,7 @@ func (uc *LoginUseCase) Execute(ctx context.Context, email, password string) (*m
 		return nil, err
 	}
 	if u == nil {
-		return nil, errors.New("invalid credentials")
+		return nil, apperror.ErrInvalidCredentials
 	}
 
 	if err := uc.userService.CheckPassword(u.PasswordHash, password); err != nil {
