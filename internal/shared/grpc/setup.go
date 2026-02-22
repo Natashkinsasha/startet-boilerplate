@@ -13,5 +13,7 @@ type GRPCConfig struct {
 // *zap.Logger parameter ensures Wire initializes the logger before gRPC.
 func Setup(cfg GRPCConfig, _ *zap.Logger) *grpc.Server {
 	zap.L().Info("grpc server created", zap.Int("port", cfg.Port))
-	return grpc.NewServer()
+	return grpc.NewServer(
+		grpc.UnaryInterceptor(ErrorInterceptor()),
+	)
 }
