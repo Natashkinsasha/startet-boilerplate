@@ -24,6 +24,8 @@ import (
 	"starter-boilerplate/internal/shared/redis"
 	"starter-boilerplate/internal/shared/server"
 	"starter-boilerplate/internal/user"
+	"starter-boilerplate/internal/user/app/service"
+	"starter-boilerplate/internal/user/infra/persistence"
 )
 
 // Injectors from initialize.go:
@@ -42,8 +44,10 @@ func InitializeApp(ctx context.Context) *app.App {
 	grpcServer := grpc.Setup(grpcConfig, zapLogger)
 	jwtConfig := configConfig.JWT
 	manager := jwt.NewJWTManager(jwtConfig)
-	init := middleware.Setup(httpServer, api, manager)
-	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init)
+	userRepository := persistence.NewUserRepository(bunDB)
+	userLoaderCreator := service.NewUserLoaderCreator(userRepository)
+	init := middleware.Setup(httpServer, api, manager, userLoaderCreator)
+	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init, userRepository)
 	redisConfig := configConfig.Redis
 	client := redis.Setup(ctx, redisConfig, zapLogger)
 	appApp := newApp(httpServer, configConfig, module, zapLogger, client, grpcServer, api)

@@ -57,3 +57,8 @@ func ClaimsFromContext(ctx context.Context) *jwt.Claims {
 	}
 	return claims
 }
+
+func ClaimsFromContextSafe(ctx context.Context) (*jwt.Claims, bool) {
+	claims, ok := ctx.Value(claimsContextKey{}).(*jwt.Claims)
+	return claims, ok && claims != nil
+}

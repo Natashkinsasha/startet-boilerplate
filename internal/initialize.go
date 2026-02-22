@@ -17,6 +17,8 @@ import (
 	"starter-boilerplate/internal/shared/redis"
 	"starter-boilerplate/internal/shared/server"
 	"starter-boilerplate/internal/user"
+	"starter-boilerplate/internal/user/app/service"
+	"starter-boilerplate/internal/user/infra/persistence"
 
 	gohuma "github.com/danielgtaylor/huma/v2"
 	"github.com/google/wire"
@@ -41,6 +43,8 @@ func InitializeApp(ctx context.Context) *app.App {
 		huma.Setup,
 		sharedgrpc.Setup,
 		sharedjwt.NewJWTManager,
+		persistence.NewUserRepository,
+		service.NewUserLoaderCreator,
 		middleware.Setup,
 
 		user.InitializeUserModule,

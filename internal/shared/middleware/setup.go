@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/pkg/jwt"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -12,13 +13,14 @@ import (
 
 type Init struct{}
 
-func Setup(srv *http.Server, api huma.API, jwtManager *jwt.Manager) Init {
+func Setup(srv *http.Server, api huma.API, jwtManager *jwt.Manager, userLoaderCreator *service.UserLoaderCreator) Init {
 	// Huma-level middleware (order: outermost first)
 	api.UseMiddleware(NewRequestIDMiddleware())
 	api.UseMiddleware(newLoggerMiddleware())
 	api.UseMiddleware(NewLimiterMiddleware(100, time.Minute))
 	api.UseMiddleware(NewAuthMiddleware(api, jwtManager))
 	api.UseMiddleware(NewRoleMiddleware(api))
+	api.UseMiddleware(NewUserLoaderMiddleware(userLoaderCreator))
 
 	// HTTP-level middleware
 	srv.Handler = WithCORS(WithRecover(srv.Handler))

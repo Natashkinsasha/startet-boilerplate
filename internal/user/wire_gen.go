@@ -13,7 +13,7 @@ import (
 	"starter-boilerplate/internal/shared/middleware"
 	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/internal/user/app/usecase"
-	"starter-boilerplate/internal/user/infra/persistence"
+	"starter-boilerplate/internal/user/domain/repository"
 	"starter-boilerplate/internal/user/transport/contract"
 	"starter-boilerplate/internal/user/transport/handler"
 	"starter-boilerplate/pkg/jwt"
@@ -21,10 +21,9 @@ import (
 
 // Injectors from initialize.go:
 
-func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, jwtManager *jwt.Manager, init middleware.Init) Module {
-	userRepository := persistence.NewUserRepository(db)
+func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manager *jwt.Manager, init middleware.Init, userRepository repository.UserRepository) Module {
 	userService := service.NewUserService(userRepository)
-	tokenService := service.NewTokenService(jwtManager)
+	tokenService := service.NewTokenService(manager)
 	loginUseCase := usecase.NewLoginUseCase(userService, tokenService)
 	loginHandler := handler.NewLoginHandler(loginUseCase)
 	refreshUseCase := usecase.NewRefreshUseCase(userService, tokenService)

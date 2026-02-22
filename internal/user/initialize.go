@@ -4,12 +4,13 @@ package user
 
 import (
 	sharedmw "starter-boilerplate/internal/shared/middleware"
-	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/internal/user/app/usecase"
-	"starter-boilerplate/internal/user/infra/persistence"
+	"starter-boilerplate/internal/user/domain/repository"
 	usercontract "starter-boilerplate/internal/user/transport/contract"
 	"starter-boilerplate/internal/user/transport/handler"
 	pkgjwt "starter-boilerplate/pkg/jwt"
+
+	"starter-boilerplate/internal/user/app/service"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/wire"
@@ -23,9 +24,8 @@ func NewModule(_ handler.HandlersInit, _ usercontract.Init) Module {
 	return Module{}
 }
 
-func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *gogrpc.Server, jwtManager *pkgjwt.Manager, _ sharedmw.Init) Module {
+func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager, _ sharedmw.Init, _ repository.UserRepository) Module {
 	wire.Build(
-		persistence.NewUserRepository,
 		service.NewUserService,
 		service.NewTokenService,
 		usecase.NewLoginUseCase,
