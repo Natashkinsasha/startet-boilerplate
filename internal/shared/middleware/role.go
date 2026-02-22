@@ -13,10 +13,6 @@ func NewRoleMiddleware(api huma.API) func(huma.Context, func(huma.Context)) {
 		}
 
 		claims := ClaimsFromContext(ctx.Context())
-		if claims == nil {
-			_ = huma.WriteErr(api, ctx, 401, "unauthorized")
-			return
-		}
 
 		for _, r := range roles {
 			if claims.Role == r {

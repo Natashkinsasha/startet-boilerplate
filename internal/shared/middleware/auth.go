@@ -51,6 +51,9 @@ func requiresBearerAuth(op *huma.Operation) bool {
 }
 
 func ClaimsFromContext(ctx context.Context) *jwt.Claims {
-	claims, _ := ctx.Value(claimsContextKey{}).(*jwt.Claims)
+	claims, ok := ctx.Value(claimsContextKey{}).(*jwt.Claims)
+	if !ok || claims == nil {
+		panic("ClaimsFromContext: no claims in context — is bearerAuth set on this operation?")
+	}
 	return claims
 }
