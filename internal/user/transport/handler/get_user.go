@@ -6,6 +6,7 @@ import (
 
 	"starter-boilerplate/internal/shared/middleware"
 	"starter-boilerplate/internal/user/app/service"
+	"starter-boilerplate/internal/user/transport/dto"
 
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -14,14 +15,10 @@ type getUserInput struct {
 	ID string `path:"id"`
 }
 
-type GetUserBody struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
-	Role  string `json:"role"`
-}
-
 type getUserOutput struct {
-	Body GetUserBody
+	Body struct {
+		User dto.UserDTO `json:"user"`
+	}
 }
 
 type GetUserHandler struct {
@@ -60,9 +57,7 @@ func (h *GetUserHandler) handle(ctx context.Context, input *getUserInput) (*getU
 		return nil, huma.Error404NotFound("user not found")
 	}
 
-	return &getUserOutput{Body: GetUserBody{
-		ID:    u.ID,
-		Email: u.Email,
-		Role:  string(u.Role),
-	}}, nil
+	out := &getUserOutput{}
+	out.Body.User = dto.NewUserDTO(u)
+	return out, nil
 }

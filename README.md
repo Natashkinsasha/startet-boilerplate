@@ -82,12 +82,14 @@ starter-boilerplate/
 │       │       ├── login.go         # LoginUseCase — orchestrates login flow
 │       │       └── refresh.go       # RefreshUseCase — orchestrates token refresh
 │       ├── transport/
+│       │   ├── dto/
+│       │   │   └── user.go          # UserDTO, TokenPairDTO — shared across HTTP & gRPC
 │       │   ├── handler/
 │       │   │   ├── setup.go         # SetupHandlers() — registers all HTTP routes
 │       │   │   ├── login.go         # LoginHandler (POST /api/v1/auth/login)
 │       │   │   ├── refresh.go       # RefreshHandler (POST /api/v1/auth/refresh)
 │       │   │   ├── get_user.go      # GetUserHandler (GET /api/v1/users/{id})
-│       │   │   └── types.go         # TokenBody, tokenOutput
+│       │   │   └── types.go         # tokenOutput
 │       │   └── contract/
 │       │       └── user.go          # gRPC Contract, SetupUserContract(), GetUser()
 │       ├── infra/
@@ -149,8 +151,9 @@ transport/handler  →  app/usecase  →  app/service  ←  infra/persistence
 | Interfaces        | `domain/repository`    | `domain/model`                                     |
 | Services          | `app/service`          | `domain/repository`, `domain/model`, `pkg/jwt`     |
 | Use cases         | `app/usecase`          | `app/service`, `domain/model`                      |
-| HTTP handlers     | `transport/handler`    | `app/usecase`, `app/service`                       |
-| gRPC contracts    | `transport/contract`   | `domain/repository`, `domain/model`                |
+| Transport DTOs    | `transport/dto`        | `domain/model`                                     |
+| HTTP handlers     | `transport/handler`    | `app/usecase`, `app/service`, `transport/dto`      |
+| gRPC contracts    | `transport/contract`   | `domain/repository`, `transport/dto`               |
 | Repository impl   | `infra/persistence`    | `domain/repository`, `domain/model`, `bun`         |
 
 ### Package naming
@@ -162,6 +165,7 @@ internal/user/domain/model/            → package model
 internal/user/domain/repository/       → package repository
 internal/user/app/service/             → package service
 internal/user/app/usecase/             → package usecase
+internal/user/transport/dto/           → package dto
 internal/user/transport/handler/       → package handler
 internal/user/transport/contract/      → package contract
 internal/user/infra/persistence/       → package persistence
@@ -676,6 +680,29 @@ type userRepository struct{ db *bun.DB }  // unexported
 func NewUserRepository(db *bun.DB) repository.UserRepository
 ```
 
+### transport/dto
+
+Stateless data-transfer package shared by HTTP handlers and gRPC contracts. Converts domain models to transport representations. Carries JSON tags so both layers can use the same types directly.
+
+```go
+// user.go
+package dto
+
+type UserDTO struct {
+    ID    string `json:"id"`
+    Email string `json:"email"`
+    Role  string `json:"role"`
+}
+
+type TokenPairDTO struct {
+    AccessToken  string `json:"access_token"`
+    RefreshToken string `json:"refresh_token"`
+}
+
+func NewUserDTO(u *model.User) UserDTO
+func NewTokenPairDTO(tp *model.TokenPair) TokenPairDTO
+```
+
 ### transport/handler
 
 ```go
@@ -689,7 +716,7 @@ func SetupHandlers(api huma.API, loginH *LoginHandler, refreshH *RefreshHandler,
 // login.go   — LoginHandler, NewLoginHandler(), Register(api), handle(ctx, *loginInput)
 // refresh.go — RefreshHandler, NewRefreshHandler(), Register(api), handle(ctx, *refreshInput)
 // get_user.go — GetUserHandler, NewGetUserHandler(), Register(api), handle(ctx, *getUserInput)
-// types.go   — TokenBody, tokenOutput
+// types.go   — tokenOutput (uses dto.TokenPairDTO as Body)
 ```
 
 ### transport/contract
@@ -708,6 +735,7 @@ type Init struct{}
 func SetupUserContract(grpcSrv *grpc.Server, ur repository.UserRepository) Init
 
 // GetUser(ctx, *gen.GetUserRequest) (*gen.GetUserResponse, error)
+// Uses dto.NewUserDTO() then maps DTO → protobuf
 ```
 
 ### HTTP endpoints
@@ -723,7 +751,7 @@ POST /api/v1/auth/refresh
 
 GET /api/v1/users/{id}
   Headers:  Authorization: Bearer <access_token>
-  Response: { "id": string, "email": string, "role": string }
+  Response: { "user": { "id": string, "email": string, "role": string } }
   Notes:    Admins can access any user; non-admins can only access their own profile
 ```
 
@@ -954,6 +982,7 @@ proto/{subdomain}/{subdomain}.proto   →   gen/{subdomain}/*.pb.go
    │   ├── service/        # package service — interfaces + implementations
    │   └── usecase/        # package usecase — orchestration logic
    ├── transport/
+   │   ├── dto/            # package dto — shared DTOs (domain → transport)
    │   ├── handler/        # package handler — HTTP handlers (one struct per endpoint)
    │   └── contract/       # package contract — gRPC contracts
    ├── infra/

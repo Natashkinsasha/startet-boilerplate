@@ -6,4 +6,4 @@ service UserContract {
   rpc GetUser (GetUserRequest) returns (GetUserResponse);
 }
 message GetUserRequest  { string id = 1; }
-message GetUserResponse { string id = 1; string email = 2; }
+message GetUserResponse { string id = 1; string email = 2; string role = 3; }

@@ -5,6 +5,7 @@ import (
 
 	gen "starter-boilerplate/gen/user"
 	"starter-boilerplate/internal/user/domain/repository"
+	"starter-boilerplate/internal/user/transport/dto"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -32,5 +33,6 @@ func (c *Contract) GetUser(ctx context.Context, req *gen.GetUserRequest) (*gen.G
 	if u == nil {
 		return nil, status.Error(codes.NotFound, "user not found")
 	}
-	return &gen.GetUserResponse{Id: u.ID, Email: u.Email}, nil
+	d := dto.NewUserDTO(u)
+	return &gen.GetUserResponse{Id: d.ID, Email: d.Email, Role: d.Role}, nil
 }

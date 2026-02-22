@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"starter-boilerplate/internal/user/transport/handler"
+	"starter-boilerplate/internal/user/transport/dto"
 )
 
 // --- Login tests ---
@@ -16,7 +16,7 @@ func (s *FunctionalSuite) TestLogin_Success() {
 	resp := s.DoRequest(http.MethodPost, "/api/v1/auth/login", body, nil)
 	s.Require().Equal(http.StatusOK, resp.StatusCode)
 
-	var tok handler.TokenBody
+	var tok dto.TokenPairDTO
 	s.ReadJSON(resp, &tok)
 	s.Assert().NotEmpty(tok.AccessToken)
 	s.Assert().NotEmpty(tok.RefreshToken)
@@ -65,7 +65,7 @@ func (s *FunctionalSuite) TestRefresh_Success() {
 	resp := s.DoRequest(http.MethodPost, "/api/v1/auth/refresh", body, nil)
 	s.Require().Equal(http.StatusOK, resp.StatusCode)
 
-	var tok handler.TokenBody
+	var tok dto.TokenPairDTO
 	s.ReadJSON(resp, &tok)
 	s.Assert().NotEmpty(tok.AccessToken)
 	s.Assert().NotEmpty(tok.RefreshToken)
@@ -94,17 +94,19 @@ func (s *FunctionalSuite) TestLoginThenGetUser_FullFlow() {
 	loginResp := s.DoRequest(http.MethodPost, "/api/v1/auth/login", loginBody, nil)
 	s.Require().Equal(http.StatusOK, loginResp.StatusCode)
 
-	var tok handler.TokenBody
+	var tok dto.TokenPairDTO
 	s.ReadJSON(loginResp, &tok)
 
 	// GetUser with access token
 	userResp := s.DoAuthRequest(http.MethodGet, "/api/v1/users/usr-user-001", tok.AccessToken, "")
 	s.Require().Equal(http.StatusOK, userResp.StatusCode)
 
-	var u handler.GetUserBody
-	s.ReadJSON(userResp, &u)
-	s.Assert().Equal("usr-user-001", u.ID)
-	s.Assert().Equal("user@example.com", u.Email)
+	var body struct {
+		User dto.UserDTO `json:"user"`
+	}
+	s.ReadJSON(userResp, &body)
+	s.Assert().Equal("usr-user-001", body.User.ID)
+	s.Assert().Equal("user@example.com", body.User.Email)
 }
 
 func (s *FunctionalSuite) TestLoginThenRefreshThenGetUser_FullFlow() {
@@ -113,7 +115,7 @@ func (s *FunctionalSuite) TestLoginThenRefreshThenGetUser_FullFlow() {
 	loginResp := s.DoRequest(http.MethodPost, "/api/v1/auth/login", loginBody, nil)
 	s.Require().Equal(http.StatusOK, loginResp.StatusCode)
 
-	var tok handler.TokenBody
+	var tok dto.TokenPairDTO
 	s.ReadJSON(loginResp, &tok)
 
 	// Refresh
@@ -121,16 +123,18 @@ func (s *FunctionalSuite) TestLoginThenRefreshThenGetUser_FullFlow() {
 	refreshResp := s.DoRequest(http.MethodPost, "/api/v1/auth/refresh", refreshBody, nil)
 	s.Require().Equal(http.StatusOK, refreshResp.StatusCode)
 
-	var newTok handler.TokenBody
+	var newTok dto.TokenPairDTO
 	s.ReadJSON(refreshResp, &newTok)
 
 	// GetUser with new access token
 	userResp := s.DoAuthRequest(http.MethodGet, "/api/v1/users/usr-admin-001", newTok.AccessToken, "")
 	s.Require().Equal(http.StatusOK, userResp.StatusCode)
 
-	var u handler.GetUserBody
-	s.ReadJSON(userResp, &u)
-	s.Assert().Equal("usr-admin-001", u.ID)
-	s.Assert().Equal("admin@example.com", u.Email)
-	s.Assert().Equal("admin", u.Role)
+	var body struct {
+		User dto.UserDTO `json:"user"`
+	}
+	s.ReadJSON(userResp, &body)
+	s.Assert().Equal("usr-admin-001", body.User.ID)
+	s.Assert().Equal("admin@example.com", body.User.Email)
+	s.Assert().Equal("admin", body.User.Role)
 }

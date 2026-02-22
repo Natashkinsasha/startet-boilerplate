@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"starter-boilerplate/internal/user/app/usecase"
+	"starter-boilerplate/internal/user/transport/dto"
 
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -40,8 +41,5 @@ func (h *LoginHandler) handle(ctx context.Context, input *loginInput) (*tokenOut
 		return nil, huma.Error401Unauthorized(err.Error())
 	}
 
-	return &tokenOutput{Body: TokenBody{
-		AccessToken:  pair.AccessToken,
-		RefreshToken: pair.RefreshToken,
-	}}, nil
+	return &tokenOutput{Body: dto.NewTokenPairDTO(pair)}, nil
 }

@@ -5,7 +5,7 @@ package functional
 import (
 	"net/http"
 
-	"starter-boilerplate/internal/user/transport/handler"
+	"starter-boilerplate/internal/user/transport/dto"
 )
 
 func (s *FunctionalSuite) TestGetUser_AdminAccessesAnyUser() {
@@ -13,11 +13,13 @@ func (s *FunctionalSuite) TestGetUser_AdminAccessesAnyUser() {
 	resp := s.DoAuthRequest(http.MethodGet, "/api/v1/users/usr-user-001", token, "")
 	s.Require().Equal(http.StatusOK, resp.StatusCode)
 
-	var u handler.GetUserBody
-	s.ReadJSON(resp, &u)
-	s.Assert().Equal("usr-user-001", u.ID)
-	s.Assert().Equal("user@example.com", u.Email)
-	s.Assert().Equal("user", u.Role)
+	var body struct {
+		User dto.UserDTO `json:"user"`
+	}
+	s.ReadJSON(resp, &body)
+	s.Assert().Equal("usr-user-001", body.User.ID)
+	s.Assert().Equal("user@example.com", body.User.Email)
+	s.Assert().Equal("user", body.User.Role)
 }
 
 func (s *FunctionalSuite) TestGetUser_UserAccessesSelf() {
@@ -25,9 +27,11 @@ func (s *FunctionalSuite) TestGetUser_UserAccessesSelf() {
 	resp := s.DoAuthRequest(http.MethodGet, "/api/v1/users/usr-user-001", token, "")
 	s.Require().Equal(http.StatusOK, resp.StatusCode)
 
-	var u handler.GetUserBody
-	s.ReadJSON(resp, &u)
-	s.Assert().Equal("usr-user-001", u.ID)
+	var body struct {
+		User dto.UserDTO `json:"user"`
+	}
+	s.ReadJSON(resp, &body)
+	s.Assert().Equal("usr-user-001", body.User.ID)
 }
 
 func (s *FunctionalSuite) TestGetUser_UserDeniedAccessToOther() {
