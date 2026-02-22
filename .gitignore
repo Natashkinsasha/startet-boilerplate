@@ -1,0 +1,22 @@
+# Binaries
+bin/
+*.exe
+
+docs/
+
+# Wire generated
+cmd/api/wire_gen.go
+
+# IDE
+.idea/
+.vscode/
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+
+swagger
+
+migrate

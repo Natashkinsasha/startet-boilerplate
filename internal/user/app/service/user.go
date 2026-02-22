@@ -1,0 +1,40 @@
+package service
+
+import (
+	"context"
+	"errors"
+
+	"starter-boilerplate/internal/user/domain/model"
+	"starter-boilerplate/internal/user/domain/repository"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+type UserService interface {
+	FindByEmail(ctx context.Context, email string) (*model.User, error)
+	FindByID(ctx context.Context, id string) (*model.User, error)
+	CheckPassword(passwordHash, password string) error
+}
+
+type userService struct {
+	userRepo repository.UserRepository
+}
+
+func NewUserService(userRepo repository.UserRepository) UserService {
+	return &userService{userRepo: userRepo}
+}
+
+func (s *userService) FindByEmail(ctx context.Context, email string) (*model.User, error) {
+	return s.userRepo.FindByEmail(ctx, email)
+}
+
+func (s *userService) FindByID(ctx context.Context, id string) (*model.User, error) {
+	return s.userRepo.FindByID(ctx, id)
+}
+
+func (s *userService) CheckPassword(passwordHash, password string) error {
+	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
+		return errors.New("invalid credentials")
+	}
+	return nil
+}
