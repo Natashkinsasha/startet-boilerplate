@@ -60,15 +60,15 @@ func (c ConsumerConfig) retryOnError() bool {
 	return *c.RetryOnError
 }
 
-// Consumer is a reusable AMQP consumer that handles queue declaration,
-// binding, prefetch, consume loop, panic recovery, and ack/nack.
-type Consumer struct {
+// consumer handles queue declaration, binding, prefetch, consume loop, and ack/nack
+// for a single AMQP queue. Created internally by [AddConsumer].
+type consumer struct {
 	cfg     ConsumerConfig
 	handler HandlerFunc
 }
 
-func NewConsumer(cfg ConsumerConfig, handler HandlerFunc, mws ...Middleware) *Consumer {
-	return &Consumer{cfg: cfg, handler: Chain(handler, mws...)}
+func newConsumer(cfg ConsumerConfig, handler HandlerFunc, mws ...Middleware) *consumer {
+	return &consumer{cfg: cfg, handler: Chain(handler, mws...)}
 }
 
 // DeliveryMeta holds AMQP message metadata extracted from amqp091.Delivery.
@@ -92,10 +92,10 @@ func newDeliveryMeta(msg *amqp091.Delivery) DeliveryMeta {
 	}
 }
 
-// TypedHandler wraps a typed handler function into a HandlerFunc.
+// typedHandler wraps a typed handler function into a HandlerFunc.
 // It unmarshals the message body into T and validates it before calling fn.
 // The handler receives the deserialized payload followed by DeliveryMeta.
-func TypedHandler[T any](fn func(ctx context.Context, payload T, meta DeliveryMeta) error) HandlerFunc {
+func typedHandler[T any](fn func(ctx context.Context, payload T, meta DeliveryMeta) error) HandlerFunc {
 	return func(ctx context.Context, msg amqp091.Delivery) error {
 		var payload T
 		if err := json.Unmarshal(msg.Body, &payload); err != nil {
@@ -121,18 +121,14 @@ func isStruct(v any) bool {
 	return t.Kind() == reflect.Struct
 }
 
-// Declare creates the queue, DLQ (if configured), and bindings.
-// Should be called once before starting Consume goroutines.
-func (c *Consumer) Declare(ch *amqp091.Channel) error {
+func (c *consumer) Declare(ch *amqp091.Channel) error {
 	if err := c.declare(ch); err != nil {
 		return err
 	}
 	return c.bind(ch)
 }
 
-// Consume sets QoS and blocks consuming messages until ctx is cancelled
-// or the channel closes. Declare must be called before Consume.
-func (c *Consumer) Consume(ctx context.Context, ch *amqp091.Channel) error {
+func (c *consumer) Consume(ctx context.Context, ch *amqp091.Channel) error {
 	if err := ch.Qos(c.cfg.prefetchCount(), 0, false); err != nil {
 		return err
 	}
@@ -149,7 +145,7 @@ func (c *Consumer) Consume(ctx context.Context, ch *amqp091.Channel) error {
 	return nil
 }
 
-func (c *Consumer) declare(ch *amqp091.Channel) error {
+func (c *consumer) declare(ch *amqp091.Channel) error {
 	var args amqp091.Table
 	if c.cfg.DeadLetterExchange != "" {
 		if err := c.declareDLQ(ch); err != nil {
@@ -172,7 +168,7 @@ func (c *Consumer) declare(ch *amqp091.Channel) error {
 	return err
 }
 
-func (c *Consumer) declareDLQ(ch *amqp091.Channel) error {
+func (c *consumer) declareDLQ(ch *amqp091.Channel) error {
 	if err := ch.ExchangeDeclare(c.cfg.DeadLetterExchange, "topic", true, false, false, false, nil); err != nil {
 		return err
 	}
@@ -189,14 +185,14 @@ func (c *Consumer) declareDLQ(ch *amqp091.Channel) error {
 	return ch.QueueBind(dlqQueue, routingKey, c.cfg.DeadLetterExchange, false, nil)
 }
 
-func (c *Consumer) bind(ch *amqp091.Channel) error {
+func (c *consumer) bind(ch *amqp091.Channel) error {
 	if c.cfg.Exchange == "" {
 		return nil
 	}
 	return ch.QueueBind(c.cfg.Queue, c.cfg.RoutingKey, c.cfg.Exchange, false, nil)
 }
 
-func (c *Consumer) process(parent context.Context, msg amqp091.Delivery) {
+func (c *consumer) process(parent context.Context, msg amqp091.Delivery) {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	defer cancel()
 

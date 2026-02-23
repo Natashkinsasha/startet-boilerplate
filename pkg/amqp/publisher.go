@@ -8,16 +8,15 @@ import (
 	amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
-// Publisher publishes messages to AMQP exchanges using a single long-lived channel.
-type Publisher struct {
+// publisher publishes messages using a single long-lived AMQP channel.
+// Internal to [Broker] — use Broker.Publish / Broker.PublishJSON.
+type publisher struct {
 	ch *amqp091.Channel
 }
 
-// NewPublisher opens a channel on the given connection.
-// If conn is nil (standalone mode), Publish will return an error.
-func NewPublisher(conn *amqp091.Connection) *Publisher {
+func newPublisher(conn *amqp091.Connection) *publisher {
 	if conn == nil {
-		return &Publisher{}
+		return &publisher{}
 	}
 
 	ch, err := conn.Channel()
@@ -25,18 +24,17 @@ func NewPublisher(conn *amqp091.Connection) *Publisher {
 		panic(fmt.Sprintf("amqp: open publisher channel: %v", err))
 	}
 
-	return &Publisher{ch: ch}
+	return &publisher{ch: ch}
 }
 
-// Close closes the underlying AMQP channel.
-func (p *Publisher) Close() error {
+func (p *publisher) Close() error {
 	if p.ch == nil {
 		return nil
 	}
 	return p.ch.Close()
 }
 
-func (p *Publisher) Publish(ctx context.Context, exchange, routingKey string, body []byte) error {
+func (p *publisher) Publish(ctx context.Context, exchange, routingKey string, body []byte) error {
 	if p.ch == nil {
 		return fmt.Errorf("amqp: channel is nil (standalone mode?)")
 	}
@@ -47,8 +45,7 @@ func (p *Publisher) Publish(ctx context.Context, exchange, routingKey string, bo
 	})
 }
 
-// PublishJSON validates, marshals the payload to JSON, and publishes it.
-func (p *Publisher) PublishJSON(ctx context.Context, exchange, routingKey string, payload any) error {
+func (p *publisher) PublishJSON(ctx context.Context, exchange, routingKey string, payload any) error {
 	if err := validate.StructCtx(ctx, payload); err != nil {
 		return fmt.Errorf("amqp: validate: %w", err)
 	}

@@ -10,49 +10,35 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// ConsumerGroup is a self-contained component that manages a set of AMQP
-// consumers. It holds the connection internally and exposes Run / Shutdown.
-type ConsumerGroup struct {
+// consumerGroup manages a set of AMQP consumers internally.
+// Not intended for direct use — access via [Broker].
+type consumerGroup struct {
 	conn      *amqp091.Connection
-	consumers []*Consumer
+	consumers []*consumer
 	mws       []Middleware
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
 }
 
-// NewConsumerGroup creates a ConsumerGroup with the given AMQP connection.
-// If conn is nil, Run will log a warning and block until ctx is done (standalone mode).
-func NewConsumerGroup(conn *amqp091.Connection) *ConsumerGroup {
-	return &ConsumerGroup{conn: conn}
+func newConsumerGroup(conn *amqp091.Connection) *consumerGroup {
+	return &consumerGroup{conn: conn}
 }
 
-// Use sets group-level middlewares that apply to all consumers.
-// Group middlewares run before per-consumer middlewares.
-func (g *ConsumerGroup) Use(mws ...Middleware) {
+func (g *consumerGroup) Use(mws ...Middleware) {
 	g.mws = append(g.mws, mws...)
 }
 
-// AddConsumer creates a typed consumer and registers it in the group.
-// Group middlewares are prepended before per-consumer middlewares.
-func AddConsumer[T any](g *ConsumerGroup, cfg ConsumerConfig, fn func(ctx context.Context, payload T, meta DeliveryMeta) error, mws ...Middleware) {
+// AddConsumer registers a typed consumer in the broker.
+// The handler receives a deserialized payload of type T and [DeliveryMeta].
+// Group-level middlewares (set via [Broker].Use) are applied before per-consumer mws.
+func AddConsumer[T any](b *Broker, cfg ConsumerConfig, fn func(ctx context.Context, payload T, meta DeliveryMeta) error, mws ...Middleware) {
+	g := b.consumers
 	allMws := append(g.mws[:len(g.mws):len(g.mws)], mws...)
-	g.consumers = append(g.consumers, NewConsumer(cfg, TypedHandler(fn), allMws...))
+	g.consumers = append(g.consumers, newConsumer(cfg, typedHandler(fn), allMws...))
 }
 
-// Merge appends consumers from other groups into this group.
-func (g *ConsumerGroup) Merge(others ...*ConsumerGroup) {
-	for _, o := range others {
-		g.consumers = append(g.consumers, o.consumers...)
-	}
-}
-
-// Run starts every consumer on a dedicated AMQP channel and blocks until
-// ctx is cancelled, Shutdown is called, or any consumer returns an error.
-//
-// On shutdown the delivery loop stops immediately, but in-flight message
-// handlers are allowed to finish before Run returns.
-func (g *ConsumerGroup) Run(ctx context.Context) error {
+func (g *consumerGroup) Run(ctx context.Context) error {
 	if g.conn == nil {
 		slog.Warn("standalone mode: skipping amqp consumers")
 		<-ctx.Done()
@@ -104,9 +90,7 @@ func (g *ConsumerGroup) Run(ctx context.Context) error {
 	return err
 }
 
-// Shutdown gracefully stops all consumers started by Run.
-// It stops accepting new messages but lets in-flight handlers finish.
-func (g *ConsumerGroup) Shutdown() {
+func (g *consumerGroup) Shutdown() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 

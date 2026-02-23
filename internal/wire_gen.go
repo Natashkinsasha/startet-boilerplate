@@ -54,10 +54,8 @@ func InitializeApp(ctx context.Context) *app.App {
 	amqpConfig := configConfig.AMQP
 	connection := amqp.Setup(amqpConfig, slogLogger)
 	broker := consumer.Setup(connection)
-	publisher := broker.Publisher
-	bus := event.NewEventBus(connection, publisher)
-	consumerGroup := broker.Consumers
-	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init, userRepository, profileRepository, bus, consumerGroup)
+	bus := event.NewEventBus(connection, broker)
+	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init, userRepository, profileRepository, bus, broker)
 	redisConfig := configConfig.Redis
 	client := redis.Setup(ctx, redisConfig, slogLogger)
 	appApp := newApp(httpServer, configConfig, module, slogLogger, client, grpcServer, api, broker)

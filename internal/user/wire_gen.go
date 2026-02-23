@@ -24,7 +24,7 @@ import (
 
 // Injectors from initialize.go:
 
-func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manager *jwt.Manager, init middleware.Init, userRepository repository.UserRepository, profileRepository repository.ProfileRepository, bus event.Bus, consumerGroup *amqp.ConsumerGroup) Module {
+func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manager *jwt.Manager, init middleware.Init, userRepository repository.UserRepository, profileRepository repository.ProfileRepository, bus event.Bus, broker *amqp.Broker) Module {
 	userService := service.NewUserService(userRepository)
 	tokenService := service.NewTokenService(manager)
 	loginUseCase := usecase.NewLoginUseCase(userService, tokenService)
@@ -38,7 +38,7 @@ func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manage
 	handlersInit := handler.SetupHandlers(api, loginHandler, refreshHandler, getUserHandler, registerHandler)
 	contractInit := contract.SetupUserContract(grpcSrv, userRepository)
 	profileCreatedConsumer := consumer.NewProfileCreatedConsumer(profileRepository)
-	consumerInit := consumer.SetupConsumers(consumerGroup, profileCreatedConsumer)
+	consumerInit := consumer.SetupConsumers(broker, profileCreatedConsumer)
 	module := NewModule(handlersInit, contractInit, consumerInit)
 	return module
 }

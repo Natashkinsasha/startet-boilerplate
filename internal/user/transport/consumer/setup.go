@@ -6,7 +6,7 @@ import (
 
 type Init struct{}
 
-func SetupConsumers(g *pkgamqp.ConsumerGroup, profileCreated *ProfileCreatedConsumer) Init {
-	profileCreated.Register(g)
+func SetupConsumers(b *pkgamqp.Broker, profileCreated *ProfileCreatedConsumer) Init {
+	profileCreated.Register(b)
 	return Init{}
 }

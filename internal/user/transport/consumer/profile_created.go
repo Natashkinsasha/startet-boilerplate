@@ -8,7 +8,10 @@ import (
 	"starter-boilerplate/internal/user/domain/model"
 	"starter-boilerplate/internal/user/domain/repository"
 	pkgamqp "starter-boilerplate/pkg/amqp"
+	"starter-boilerplate/pkg/event"
 )
+
+const queueProfileCreated = "user.profile.created"
 
 type ProfileCreatedConsumer struct {
 	repo repository.ProfileRepository
@@ -18,14 +21,14 @@ func NewProfileCreatedConsumer(repo repository.ProfileRepository) *ProfileCreate
 	return &ProfileCreatedConsumer{repo: repo}
 }
 
-func (c *ProfileCreatedConsumer) Register(g *pkgamqp.ConsumerGroup) {
-	pkgamqp.AddConsumer(g,
+func (c *ProfileCreatedConsumer) Register(b *pkgamqp.Broker) {
+	pkgamqp.AddConsumer(b,
 		pkgamqp.ConsumerConfig{
-			Queue:                "user.profile.created",
-			Exchange:             "events",
-			RoutingKey:           "user.created",
-			DeadLetterExchange:   "dlx",
-			DeadLetterRoutingKey: "user.profile.created",
+			Queue:                queueProfileCreated,
+			Exchange:             event.ExchangeEvents,
+			RoutingKey:           domain.EventUserCreated,
+			DeadLetterExchange:   event.ExchangeDLX,
+			DeadLetterRoutingKey: queueProfileCreated,
 		},
 		c.Consume,
 	)

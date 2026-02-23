@@ -27,7 +27,7 @@ func NewModule(_ handler.HandlersInit, _ usercontract.Init, _ consumer.Init) Mod
 	return Module{}
 }
 
-func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager, _ sharedmw.Init, _ repository.UserRepository, _ repository.ProfileRepository, _ event.Bus, _ *pkgamqp.ConsumerGroup) Module {
+func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager, _ sharedmw.Init, _ repository.UserRepository, _ repository.ProfileRepository, _ event.Bus, _ *pkgamqp.Broker) Module {
 	wire.Build(
 		service.NewUserService,
 		service.NewTokenService,

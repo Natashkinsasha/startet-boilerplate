@@ -54,7 +54,6 @@ func InitializeApp(ctx context.Context) *app.App {
 		middleware.Setup,
 
 		sharedconsumer.Setup,
-		wire.FieldsOf(new(*pkgamqp.Broker), "Publisher", "Consumers"),
 		user.InitializeUserModule,
 
 		newApp,

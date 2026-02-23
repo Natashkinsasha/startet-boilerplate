@@ -9,28 +9,33 @@ import (
 	amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
+const (
+	ExchangeEvents = "events"
+	ExchangeDLX    = "dlx"
+)
+
 // AMQPBus implements Bus by publishing events to a single topic exchange.
 // The routing key is derived from Event.EventName().
 type AMQPBus struct {
-	publisher *pkgamqp.Publisher
-	exchange  string
+	broker   *pkgamqp.Broker
+	exchange string
 }
 
-func NewAMQPBus(publisher *pkgamqp.Publisher, exchange string) *AMQPBus {
-	return &AMQPBus{publisher: publisher, exchange: exchange}
+func NewAMQPBus(broker *pkgamqp.Broker, exchange string) *AMQPBus {
+	return &AMQPBus{broker: broker, exchange: exchange}
 }
 
 // NewEventBus is a Wire provider that creates a Bus backed by AMQP
-// with a default "events" topic exchange.
+// with the "events" topic exchange.
 // It declares the exchange on startup so both publishers and consumers
 // can rely on it regardless of initialization order.
-func NewEventBus(conn *amqp091.Connection, publisher *pkgamqp.Publisher) Bus {
+func NewEventBus(conn *amqp091.Connection, broker *pkgamqp.Broker) Bus {
 	if conn != nil {
-		if err := declareExchange(conn, "events"); err != nil {
+		if err := declareExchange(conn, ExchangeEvents); err != nil {
 			panic(fmt.Sprintf("event bus: declare exchange: %v", err))
 		}
 	}
-	return NewAMQPBus(publisher, "events")
+	return NewAMQPBus(broker, ExchangeEvents)
 }
 
 func declareExchange(conn *amqp091.Connection, name string) error {
@@ -43,5 +48,5 @@ func declareExchange(conn *amqp091.Connection, name string) error {
 }
 
 func (b *AMQPBus) Publish(ctx context.Context, e Event) error {
-	return b.publisher.PublishJSON(ctx, b.exchange, e.EventName(), e)
+	return b.broker.PublishJSON(ctx, b.exchange, e.EventName(), e)
 }
