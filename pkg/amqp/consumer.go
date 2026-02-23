@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"runtime/debug"
+	"reflect"
 
 	"github.com/go-playground/validator/v10"
 	amqp091 "github.com/rabbitmq/amqp091-go"
@@ -26,7 +26,8 @@ type ConsumerConfig struct {
 	AutoDelete           bool   // default: false
 	Exclusive            bool   // default: false
 	PrefetchCount        int    // default: 1
-	RetryOnError         *bool  // nack+requeue on error, default: true
+	Concurrency          int    // parallel goroutines per consumer, default: 1
+	RetryOnError         *bool  // nack+requeue on error, default: false
 	DeadLetterExchange   string // optional, x-dead-letter-exchange
 	DeadLetterRoutingKey string // optional, x-dead-letter-routing-key
 }
@@ -45,9 +46,16 @@ func (c ConsumerConfig) prefetchCount() int {
 	return c.PrefetchCount
 }
 
+func (c ConsumerConfig) concurrency() int {
+	if c.Concurrency <= 0 {
+		return 1
+	}
+	return c.Concurrency
+}
+
 func (c ConsumerConfig) retryOnError() bool {
 	if c.RetryOnError == nil {
-		return true
+		return false
 	}
 	return *c.RetryOnError
 }
@@ -59,36 +67,72 @@ type Consumer struct {
 	handler HandlerFunc
 }
 
-func NewConsumer(cfg ConsumerConfig, handler HandlerFunc) *Consumer {
-	return &Consumer{cfg: cfg, handler: handler}
+func NewConsumer(cfg ConsumerConfig, handler HandlerFunc, mws ...Middleware) *Consumer {
+	return &Consumer{cfg: cfg, handler: Chain(handler, mws...)}
+}
+
+// DeliveryMeta holds AMQP message metadata extracted from amqp091.Delivery.
+type DeliveryMeta struct {
+	Headers     amqp091.Table
+	RoutingKey  string
+	Exchange    string
+	MessageID   string
+	ContentType string
+	Timestamp   int64
+}
+
+func newDeliveryMeta(msg *amqp091.Delivery) DeliveryMeta {
+	return DeliveryMeta{
+		Headers:     msg.Headers,
+		RoutingKey:  msg.RoutingKey,
+		Exchange:    msg.Exchange,
+		MessageID:   msg.MessageId,
+		ContentType: msg.ContentType,
+		Timestamp:   msg.Timestamp.Unix(),
+	}
 }
 
 // TypedHandler wraps a typed handler function into a HandlerFunc.
 // It unmarshals the message body into T and validates it before calling fn.
-func TypedHandler[T any](fn func(ctx context.Context, payload T) error) HandlerFunc {
+// The handler receives the deserialized payload followed by DeliveryMeta.
+func TypedHandler[T any](fn func(ctx context.Context, payload T, meta DeliveryMeta) error) HandlerFunc {
 	return func(ctx context.Context, msg amqp091.Delivery) error {
 		var payload T
 		if err := json.Unmarshal(msg.Body, &payload); err != nil {
 			return fmt.Errorf("unmarshal: %w", err)
 		}
-		if err := validate.StructCtx(ctx, payload); err != nil {
-			return fmt.Errorf("validate: %w", err)
+		if isStruct(payload) {
+			if err := validate.StructCtx(ctx, payload); err != nil {
+				return fmt.Errorf("validate: %w", err)
+			}
 		}
-		return fn(ctx, payload)
+		return fn(ctx, payload, newDeliveryMeta(&msg))
 	}
 }
 
-// Run declares the queue, binds it (if configured), sets QoS, and
-// blocks consuming messages until ctx is cancelled or the channel closes.
-func (c *Consumer) Run(ctx context.Context, ch *amqp091.Channel) error {
+func isStruct(v any) bool {
+	t := reflect.TypeOf(v)
+	if t == nil {
+		return false
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return t.Kind() == reflect.Struct
+}
+
+// Declare creates the queue, DLQ (if configured), and bindings.
+// Should be called once before starting Consume goroutines.
+func (c *Consumer) Declare(ch *amqp091.Channel) error {
 	if err := c.declare(ch); err != nil {
 		return err
 	}
+	return c.bind(ch)
+}
 
-	if err := c.bind(ch); err != nil {
-		return err
-	}
-
+// Consume sets QoS and blocks consuming messages until ctx is cancelled
+// or the channel closes. Declare must be called before Consume.
+func (c *Consumer) Consume(ctx context.Context, ch *amqp091.Channel) error {
 	if err := ch.Qos(c.cfg.prefetchCount(), 0, false); err != nil {
 		return err
 	}
@@ -108,6 +152,9 @@ func (c *Consumer) Run(ctx context.Context, ch *amqp091.Channel) error {
 func (c *Consumer) declare(ch *amqp091.Channel) error {
 	var args amqp091.Table
 	if c.cfg.DeadLetterExchange != "" {
+		if err := c.declareDLQ(ch); err != nil {
+			return fmt.Errorf("declare dlq: %w", err)
+		}
 		args = amqp091.Table{"x-dead-letter-exchange": c.cfg.DeadLetterExchange}
 		if c.cfg.DeadLetterRoutingKey != "" {
 			args["x-dead-letter-routing-key"] = c.cfg.DeadLetterRoutingKey
@@ -125,6 +172,23 @@ func (c *Consumer) declare(ch *amqp091.Channel) error {
 	return err
 }
 
+func (c *Consumer) declareDLQ(ch *amqp091.Channel) error {
+	if err := ch.ExchangeDeclare(c.cfg.DeadLetterExchange, "topic", true, false, false, false, nil); err != nil {
+		return err
+	}
+
+	dlqQueue := c.cfg.Queue + ".dlq"
+	if _, err := ch.QueueDeclare(dlqQueue, true, false, false, false, nil); err != nil {
+		return err
+	}
+
+	routingKey := c.cfg.DeadLetterRoutingKey
+	if routingKey == "" {
+		routingKey = c.cfg.Queue
+	}
+	return ch.QueueBind(dlqQueue, routingKey, c.cfg.DeadLetterExchange, false, nil)
+}
+
 func (c *Consumer) bind(ch *amqp091.Channel) error {
 	if c.cfg.Exchange == "" {
 		return nil
@@ -133,34 +197,15 @@ func (c *Consumer) bind(ch *amqp091.Channel) error {
 }
 
 func (c *Consumer) process(parent context.Context, msg amqp091.Delivery) {
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	defer cancel()
 
-	log := slog.Default().With(slog.String("queue", c.cfg.Queue))
-
-	panicked := true
-	defer func() {
-		if !panicked {
-			return
-		}
-		r := recover()
-		log.Error("panic while handling message",
-			slog.Any("panic", r),
-			slog.String("stack", string(debug.Stack())),
-		)
-		_ = msg.Nack(false, true)
-	}()
-
 	err := c.handler(ctx, msg)
-	panicked = false
-
 	if err != nil {
-		log.Error("handler error", slog.Any("error", err))
 		_ = msg.Nack(false, c.cfg.retryOnError())
 		return
 	}
-
 	if ackErr := msg.Ack(false); ackErr != nil {
-		log.Error("failed to ack message", slog.Any("error", ackErr))
+		slog.Error("failed to ack message", slog.Any("error", ackErr))
 	}
 }

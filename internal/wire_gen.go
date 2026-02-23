@@ -9,13 +9,13 @@ package internal
 import (
 	"context"
 	huma2 "github.com/danielgtaylor/huma/v2"
-	"github.com/rabbitmq/amqp091-go"
 	redis2 "github.com/redis/go-redis/v9"
 	grpc2 "google.golang.org/grpc"
 	"log/slog"
 	"net/http"
 	"starter-boilerplate/internal/shared/app"
 	"starter-boilerplate/internal/shared/config"
+	"starter-boilerplate/internal/shared/consumer"
 	"starter-boilerplate/internal/shared/huma"
 	"starter-boilerplate/internal/shared/jwt"
 	"starter-boilerplate/internal/shared/logger"
@@ -24,7 +24,6 @@ import (
 	"starter-boilerplate/internal/user"
 	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/internal/user/infra/persistence"
-	"starter-boilerplate/internal/user/transport/consumer"
 	"starter-boilerplate/pkg/amqp"
 	"starter-boilerplate/pkg/db"
 	"starter-boilerplate/pkg/event"
@@ -51,21 +50,22 @@ func InitializeApp(ctx context.Context) *app.App {
 	userRepository := persistence.NewUserRepository(bunDB)
 	userLoaderCreator := service.NewUserLoaderCreator(userRepository)
 	init := middleware.Setup(httpServer, api, manager, userLoaderCreator)
+	profileRepository := persistence.NewProfileRepository(bunDB)
 	amqpConfig := configConfig.AMQP
 	connection := amqp.Setup(amqpConfig, slogLogger)
-	publisher := amqp.NewPublisher(connection)
-	bus := event.NewEventBus(publisher)
-	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init, userRepository, bus)
+	broker := consumer.Setup(connection)
+	publisher := broker.Publisher
+	bus := event.NewEventBus(connection, publisher)
+	consumerGroup := broker.Consumers
+	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init, userRepository, profileRepository, bus, consumerGroup)
 	redisConfig := configConfig.Redis
 	client := redis.Setup(ctx, redisConfig, slogLogger)
-	runner := consumer.SetupConsumers(connection)
-	appApp := newApp(httpServer, configConfig, module, slogLogger, client, connection, publisher, grpcServer, api, runner)
+	appApp := newApp(httpServer, configConfig, module, slogLogger, client, grpcServer, api, broker)
 	return appApp
 }
 
 // initialize.go:
 
-func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *slog.Logger, _ *redis2.Client, _ *amqp091.Connection, _ *amqp.Publisher, grpcSrv *grpc2.Server, api huma2.API, consumerRunner consumer.Runner) *app.App {
-	consumers := []func(ctx context.Context) error{(func(ctx context.Context) error)(consumerRunner)}
-	return app.New(httpSrv, cfg, grpcSrv, api, consumers)
+func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *slog.Logger, _ *redis2.Client, grpcSrv *grpc2.Server, api huma2.API, broker *amqp.Broker) *app.App {
+	return app.New(httpSrv, cfg, grpcSrv, api, broker)
 }

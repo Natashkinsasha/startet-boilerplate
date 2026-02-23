@@ -6,8 +6,10 @@ import (
 	sharedmw "starter-boilerplate/internal/shared/middleware"
 	"starter-boilerplate/internal/user/app/usecase"
 	"starter-boilerplate/internal/user/domain/repository"
+	"starter-boilerplate/internal/user/transport/consumer"
 	usercontract "starter-boilerplate/internal/user/transport/contract"
 	"starter-boilerplate/internal/user/transport/handler"
+	pkgamqp "starter-boilerplate/pkg/amqp"
 	"starter-boilerplate/pkg/event"
 	pkgjwt "starter-boilerplate/pkg/jwt"
 
@@ -21,11 +23,11 @@ import (
 
 type Module struct{}
 
-func NewModule(_ handler.HandlersInit, _ usercontract.Init) Module {
+func NewModule(_ handler.HandlersInit, _ usercontract.Init, _ consumer.Init) Module {
 	return Module{}
 }
 
-func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager, _ sharedmw.Init, _ repository.UserRepository, _ event.Bus) Module {
+func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager, _ sharedmw.Init, _ repository.UserRepository, _ repository.ProfileRepository, _ event.Bus, _ *pkgamqp.ConsumerGroup) Module {
 	wire.Build(
 		service.NewUserService,
 		service.NewTokenService,
@@ -39,6 +41,8 @@ func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pk
 		handler.NewRegisterHandler,
 		handler.SetupHandlers,
 		usercontract.SetupUserContract,
+		consumer.NewProfileCreatedConsumer,
+		consumer.SetupConsumers,
 		NewModule,
 	)
 	return Module{}

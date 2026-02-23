@@ -9,6 +9,7 @@ import (
 
 	"starter-boilerplate/internal/shared/app"
 	"starter-boilerplate/internal/shared/config"
+	sharedconsumer "starter-boilerplate/internal/shared/consumer"
 	"starter-boilerplate/internal/shared/huma"
 	sharedjwt "starter-boilerplate/internal/shared/jwt"
 	"starter-boilerplate/internal/shared/logger"
@@ -17,7 +18,6 @@ import (
 	"starter-boilerplate/internal/user"
 	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/internal/user/infra/persistence"
-	"starter-boilerplate/internal/user/transport/consumer"
 	pkgamqp "starter-boilerplate/pkg/amqp"
 	"starter-boilerplate/pkg/db"
 	"starter-boilerplate/pkg/event"
@@ -26,14 +26,12 @@ import (
 
 	gohuma "github.com/danielgtaylor/huma/v2"
 	"github.com/google/wire"
-	amqp091 "github.com/rabbitmq/amqp091-go"
 	goredis "github.com/redis/go-redis/v9"
 	gogrpc "google.golang.org/grpc"
 )
 
-func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *slog.Logger, _ *goredis.Client, _ *amqp091.Connection, _ *pkgamqp.Publisher, grpcSrv *gogrpc.Server, api gohuma.API, consumerRunner consumer.Runner) *app.App {
-	consumers := []func(ctx context.Context) error{(func(ctx context.Context) error)(consumerRunner)}
-	return app.New(httpSrv, cfg, grpcSrv, api, consumers)
+func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *slog.Logger, _ *goredis.Client, grpcSrv *gogrpc.Server, api gohuma.API, broker *pkgamqp.Broker) *app.App {
+	return app.New(httpSrv, cfg, grpcSrv, api, broker)
 }
 
 func InitializeApp(ctx context.Context) *app.App {
@@ -44,7 +42,6 @@ func InitializeApp(ctx context.Context) *app.App {
 		db.Setup,
 		redis.Setup,
 		pkgamqp.Setup,
-		pkgamqp.NewPublisher,
 		event.NewEventBus,
 		server.SetupMux,
 		server.SetupHTTPServer,
@@ -52,11 +49,12 @@ func InitializeApp(ctx context.Context) *app.App {
 		pkggrpc.Setup,
 		sharedjwt.NewJWTManager,
 		persistence.NewUserRepository,
+		persistence.NewProfileRepository,
 		service.NewUserLoaderCreator,
 		middleware.Setup,
 
-		consumer.SetupConsumers,
-
+		sharedconsumer.Setup,
+		wire.FieldsOf(new(*pkgamqp.Broker), "Publisher", "Consumers"),
 		user.InitializeUserModule,
 
 		newApp,

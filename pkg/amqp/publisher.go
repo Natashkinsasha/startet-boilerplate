@@ -8,26 +8,40 @@ import (
 	amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
+// Publisher publishes messages to AMQP exchanges using a single long-lived channel.
 type Publisher struct {
-	conn *amqp091.Connection
+	ch *amqp091.Channel
 }
 
+// NewPublisher opens a channel on the given connection.
+// If conn is nil (standalone mode), Publish will return an error.
 func NewPublisher(conn *amqp091.Connection) *Publisher {
-	return &Publisher{conn: conn}
+	if conn == nil {
+		return &Publisher{}
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		panic(fmt.Sprintf("amqp: open publisher channel: %v", err))
+	}
+
+	return &Publisher{ch: ch}
+}
+
+// Close closes the underlying AMQP channel.
+func (p *Publisher) Close() error {
+	if p.ch == nil {
+		return nil
+	}
+	return p.ch.Close()
 }
 
 func (p *Publisher) Publish(ctx context.Context, exchange, routingKey string, body []byte) error {
-	if p.conn == nil {
-		return fmt.Errorf("amqp: connection is nil (standalone mode?)")
+	if p.ch == nil {
+		return fmt.Errorf("amqp: channel is nil (standalone mode?)")
 	}
 
-	ch, err := p.conn.Channel()
-	if err != nil {
-		return fmt.Errorf("amqp: open channel: %w", err)
-	}
-	defer ch.Close()
-
-	return ch.PublishWithContext(ctx, exchange, routingKey, false, false, amqp091.Publishing{
+	return p.ch.PublishWithContext(ctx, exchange, routingKey, false, false, amqp091.Publishing{
 		ContentType: "application/json",
 		Body:        body,
 	})

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"starter-boilerplate/internal/shared/config"
+	pkgamqp "starter-boilerplate/pkg/amqp"
 
 	gohuma "github.com/danielgtaylor/huma/v2"
 	"golang.org/x/sync/errgroup"
@@ -21,18 +22,18 @@ type App struct {
 	GRPCServer *gogrpc.Server
 	Config     *config.Config
 	Api        gohuma.API
-	Consumers  []func(ctx context.Context) error
+	broker     *pkgamqp.Broker
 	ready      chan struct{}
 	startErr   chan error
 }
 
-func New(httpSrv *http.Server, cfg *config.Config, grpcSrv *gogrpc.Server, api gohuma.API, consumers []func(ctx context.Context) error) *App {
+func New(httpSrv *http.Server, cfg *config.Config, grpcSrv *gogrpc.Server, api gohuma.API, broker *pkgamqp.Broker) *App {
 	return &App{
 		HTTPServer: httpSrv,
 		GRPCServer: grpcSrv,
 		Config:     cfg,
 		Api:        api,
-		Consumers:  consumers,
+		broker:     broker,
 		ready:      make(chan struct{}),
 		startErr:   make(chan error, 1),
 	}
@@ -69,6 +70,11 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
+	slog.Info("application starting",
+		slog.Int("http_port", a.Config.App.Port),
+		slog.Int("grpc_port", a.Config.GRPC.Port),
+	)
+
 	close(a.ready)
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -89,11 +95,9 @@ func (a *App) Run(ctx context.Context) error {
 		return nil
 	})
 
-	for _, c := range a.Consumers {
-		g.Go(func() error {
-			return c(gCtx)
-		})
-	}
+	g.Go(func() error {
+		return a.broker.Run(gCtx)
+	})
 
 	g.Go(func() error {
 		<-gCtx.Done()
@@ -105,6 +109,8 @@ func (a *App) Run(ctx context.Context) error {
 
 func (a *App) shutdown() error {
 	slog.Info("shutting down servers...")
+
+	a.broker.Shutdown()
 
 	timeout := a.Config.App.ShutdownTimeout
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

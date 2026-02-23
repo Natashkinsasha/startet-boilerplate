@@ -14,15 +14,17 @@ import (
 	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/internal/user/app/usecase"
 	"starter-boilerplate/internal/user/domain/repository"
+	"starter-boilerplate/internal/user/transport/consumer"
 	"starter-boilerplate/internal/user/transport/contract"
 	"starter-boilerplate/internal/user/transport/handler"
+	"starter-boilerplate/pkg/amqp"
 	"starter-boilerplate/pkg/event"
 	"starter-boilerplate/pkg/jwt"
 )
 
 // Injectors from initialize.go:
 
-func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manager *jwt.Manager, init middleware.Init, userRepository repository.UserRepository, bus event.Bus) Module {
+func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manager *jwt.Manager, init middleware.Init, userRepository repository.UserRepository, profileRepository repository.ProfileRepository, bus event.Bus, consumerGroup *amqp.ConsumerGroup) Module {
 	userService := service.NewUserService(userRepository)
 	tokenService := service.NewTokenService(manager)
 	loginUseCase := usecase.NewLoginUseCase(userService, tokenService)
@@ -35,7 +37,9 @@ func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manage
 	registerHandler := handler.NewRegisterHandler(registerUseCase)
 	handlersInit := handler.SetupHandlers(api, loginHandler, refreshHandler, getUserHandler, registerHandler)
 	contractInit := contract.SetupUserContract(grpcSrv, userRepository)
-	module := NewModule(handlersInit, contractInit)
+	profileCreatedConsumer := consumer.NewProfileCreatedConsumer(profileRepository)
+	consumerInit := consumer.SetupConsumers(consumerGroup, profileCreatedConsumer)
+	module := NewModule(handlersInit, contractInit, consumerInit)
 	return module
 }
 
@@ -43,6 +47,6 @@ func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manage
 
 type Module struct{}
 
-func NewModule(_ handler.HandlersInit, _ contract.Init) Module {
+func NewModule(_ handler.HandlersInit, _ contract.Init, _ consumer.Init) Module {
 	return Module{}
 }
