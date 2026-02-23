@@ -40,3 +40,7 @@ func (m *UserService) HashPassword(password string) (string, error) {
 	args := m.Called(password)
 	return args.String(0), args.Error(1)
 }
+
+func (m *UserService) UpdatePassword(ctx context.Context, id, hash string) error {
+	return m.Called(ctx, id, hash).Error(0)
+}

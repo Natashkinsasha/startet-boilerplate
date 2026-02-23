@@ -7,7 +7,7 @@ import (
 
 	"starter-boilerplate/internal/shared/errs"
 	"starter-boilerplate/internal/user/app/service"
-	"starter-boilerplate/internal/user/domain"
+	domainevent "starter-boilerplate/internal/user/domain/event"
 	"starter-boilerplate/internal/user/domain/model"
 	"starter-boilerplate/pkg/event"
 )
@@ -51,7 +51,7 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, email, password string) 
 		return nil, err
 	}
 
-	if err := uc.eventBus.Publish(ctx, domain.UserCreatedEvent{
+	if err := uc.eventBus.Publish(ctx, domainevent.UserCreatedEvent{
 		UserID: user.ID,
 		Email:  user.Email,
 	}); err != nil {

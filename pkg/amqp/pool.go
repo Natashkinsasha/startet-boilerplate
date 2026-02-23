@@ -72,14 +72,14 @@ func (p *publisherPool) put(pub publisher) {
 	p.slots <- pub
 }
 
-func (p *publisherPool) Publish(ctx context.Context, exchange, routingKey string, body []byte) error {
+func (p *publisherPool) Publish(ctx context.Context, exchange, routingKey string, headers amqp091.Table, body []byte) error {
 	pub, err := p.get(ctx)
 	if err != nil {
 		return err
 	}
 	defer p.put(pub)
 
-	return pub.Publish(ctx, exchange, routingKey, body)
+	return pub.Publish(ctx, exchange, routingKey, headers, body)
 }
 
 func (p *publisherPool) Close() error {

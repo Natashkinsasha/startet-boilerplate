@@ -38,6 +38,14 @@ func AddConsumer[T any](b *Broker, cfg ConsumerConfig, fn func(ctx context.Conte
 	g.consumers = append(g.consumers, newConsumer(cfg, typedHandler(fn), allMws...))
 }
 
+// AddRawConsumer registers a consumer that receives raw message bytes and [DeliveryMeta].
+// Group-level middlewares (set via [Broker].Use) are applied before per-consumer mws.
+func AddRawConsumer(b *Broker, cfg ConsumerConfig, fn func(ctx context.Context, body []byte, meta DeliveryMeta) error, mws ...Middleware) {
+	g := b.consumers
+	allMws := append(g.mws[:len(g.mws):len(g.mws)], mws...)
+	g.consumers = append(g.consumers, newConsumer(cfg, rawHandler(fn), allMws...))
+}
+
 func (g *consumerGroup) Run(ctx context.Context) error {
 	if g.conn == nil {
 		slog.Warn("standalone mode: skipping amqp consumers")

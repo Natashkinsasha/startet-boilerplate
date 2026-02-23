@@ -64,40 +64,49 @@ starter-boilerplate/
 │   │   └── jwt/
 │   │       └── jwt.go       # JWTConfig; NewJWTManager(JWTConfig) → *pkgjwt.Manager
 │   │
-│   └── user/                # subdomain (user + auth combined)
+│   └── user/                # subdomain (user + auth + profile)
 │       ├── domain/
 │       │   ├── model/
-│       │   │   └── user.go          # User, TokenPair, Role
+│       │   │   ├── user.go            # User, TokenPair, Role
+│       │   │   ├── profile.go         # Profile (Numbers, Strings JSONB maps)
+│       │   │   └── profile_update.go  # ProfileUpdate builder (SetNumber, IncrNumber, SetString)
 │       │   ├── repository/
-│       │   │   └── user.go          # UserRepository (interface)
-│       │   └── event.go             # UserCreatedEvent (implements pkg/event.Event)
+│       │   │   ├── user.go            # UserRepository (interface)
+│       │   │   └── profile.go         # ProfileRepository (interface)
+│       │   └── event/
+│       │       ├── user_created.go      # UserCreatedEvent (tag: profile)
+│       │       └── password_changed.go  # PasswordChangedEvent (tag: profile)
 │       ├── app/
 │       │   ├── service/
 │       │   │   ├── user.go          # UserService interface + impl
-│       │   │   └── token.go         # TokenService interface + impl
+│       │   │   ├── token.go         # TokenService interface + impl
+│       │   │   └── profile.go       # ProfileService — event handlers for profile updates
 │       │   └── usecase/
-│       │       ├── login.go         # LoginUseCase — orchestrates login flow
-│       │       ├── refresh.go       # RefreshUseCase — orchestrates token refresh
-│       │       ├── register.go      # RegisterUseCase — orchestrates registration + auto-login
-│       │       └── get_user.go      # GetUserUseCase — user profile access with role check
+│       │       ├── login.go           # LoginUseCase
+│       │       ├── refresh.go         # RefreshUseCase
+│       │       ├── register.go        # RegisterUseCase (publishes UserCreatedEvent)
+│       │       ├── get_user.go        # GetUserUseCase
+│       │       └── change_password.go # ChangePasswordUseCase (publishes PasswordChangedEvent)
 │       ├── transport/
 │       │   ├── dto/
 │       │   │   └── user.go          # UserDTO, TokenPairDTO — shared across HTTP & gRPC
 │       │   ├── handler/
-│       │   │   ├── setup.go         # SetupHandlers() — registers all HTTP routes
-│       │   │   ├── login.go         # LoginHandler (POST /api/v1/auth/login)
-│       │   │   ├── refresh.go       # RefreshHandler (POST /api/v1/auth/refresh)
-│       │   │   ├── register.go      # RegisterHandler (POST /api/v1/auth/register)
-│       │   │   ├── get_user.go      # GetUserHandler (GET /api/v1/users/{id})
-│       │   │   └── types.go         # tokenOutput
+│       │   │   ├── setup.go           # SetupHandlers() — registers all HTTP routes
+│       │   │   ├── login.go           # LoginHandler (POST /api/v1/auth/login)
+│       │   │   ├── refresh.go         # RefreshHandler (POST /api/v1/auth/refresh)
+│       │   │   ├── register.go        # RegisterHandler (POST /api/v1/auth/register)
+│       │   │   ├── change_password.go # ChangePasswordHandler (PUT /api/v1/auth/password)
+│       │   │   ├── get_user.go        # GetUserHandler (GET /api/v1/users/{id})
+│       │   │   └── types.go           # tokenOutput
 │       │   ├── consumer/
-│       │   │   ├── setup.go         # SetupConsumers() — Runner func for AMQP consumers
-│       │   │   └── example.go       # example consumer (queue: user.example)
+│       │   │   ├── setup.go              # SetupConsumers() — registers all AMQP consumers
+│       │   │   └── profile_updater.go    # ProfileUpdaterConsumer — AMQP wiring, delegates to ProfileService
 │       │   └── contract/
 │       │       └── user.go          # gRPC Contract, SetupUserContract(), GetUser()
 │       ├── infra/
 │       │   └── persistence/
-│       │       └── user.go          # userRepository — implements UserRepository
+│       │       ├── user.go          # userRepository — implements UserRepository
+│       │       └── profile.go       # profileRepository — implements ProfileRepository (JSONB updates)
 │       ├── initialize.go            # Wire injector: Module, InitializeUserModule
 │       └── wire_gen.go              # generated
 │
@@ -163,21 +172,66 @@ starter-boilerplate/
 ### Subdomain layers
 
 ```
-transport/handler  →  app/usecase  →  app/service  ←  infra/persistence
+transport/handler   →  app/usecase  →  app/service  ←  infra/persistence
+transport/consumer  →  app/service                   ←  infra/persistence
         ↓                  ↓               ↓                   ↓
    domain/repository  (interfaces)    domain/model (entities)
+                                      domain/event (events)
 ```
 
 | Layer             | Package                | Depends on                                         |
 |-------------------|------------------------|----------------------------------------------------|
-| Entities / DTOs   | `domain/model`         | nothing external                                   |
+| Entities / VOs    | `domain/model`         | nothing external                                   |
 | Interfaces        | `domain/repository`    | `domain/model`                                     |
-| Services          | `app/service`          | `domain/repository`, `domain/model`, `pkg/jwt`, `shared/errs` |
-| Use cases         | `app/usecase`          | `app/service`, `domain/model`, `shared/middleware`, `shared/errs`, `pkg/event` |
+| Domain events     | `domain/event`         | `pkg/event` (for `Event` interface)                |
+| Services          | `app/service`          | `domain/repository`, `domain/model`, `domain/event`, `pkg/jwt`, `pkg/amqp`, `shared/errs` |
+| Use cases         | `app/usecase`          | `app/service`, `domain/model`, `domain/event`, `shared/middleware`, `shared/errs`, `pkg/event` |
 | Transport DTOs    | `transport/dto`        | `domain/model`                                     |
-| HTTP handlers     | `transport/handler`    | `app/usecase`, `app/service`, `transport/dto`      |
+| HTTP handlers     | `transport/handler`    | `app/usecase`, `transport/dto`                     |
+| AMQP consumers    | `transport/consumer`   | `app/service`, `shared/event`, `pkg/amqp`          |
 | gRPC contracts    | `transport/contract`   | `domain/repository`, `transport/dto`               |
 | Repository impl   | `infra/persistence`    | `domain/repository`, `domain/model`, `bun`         |
+
+### Use cases vs services
+
+**Use cases** (`app/usecase/`) orchestrate a user-initiated action. Each use case is a single-purpose struct with an `Execute` method. They are called from HTTP handlers.
+
+**Services** (`app/service/`) come in two flavors:
+- **Domain services** — interface + unexported impl (e.g. `UserService`, `TokenService`). Provide reusable operations called by use cases.
+- **Event-handling services** — exported struct with `On*` methods (e.g. `ProfileService`). React to domain events from AMQP consumers. Methods match the `sharedevent.Route` signature: `func(ctx context.Context, event T, meta pkgamqp.DeliveryMeta) error`.
+
+Event handlers are NOT use cases — they go in services.
+
+### Consumers
+
+Consumers are **thin AMQP wiring layers**. They only configure queue/exchange bindings and delegate to service method references via `sharedevent.Route`. No business logic in consumers.
+
+```go
+// consumer wires service methods directly — no wrapper per event
+func (c *ProfileUpdaterConsumer) Register(b *pkgamqp.Broker) {
+    r := sharedevent.NewRouter()
+    sharedevent.Route(r, c.profileSvc.OnUserCreated)
+    sharedevent.Route(r, c.profileSvc.OnPasswordChanged)
+    // ...
+}
+```
+
+Adding a new event handler = one new method on the service + one `sharedevent.Route` line in the consumer.
+
+### Domain events
+
+Events live in `domain/event/` and implement `pkg/event.Event` (requires `EventName() string`). Events optionally implement `event.Taggable` (`Tags() []string`) for headers-exchange routing.
+
+Use cases publish events via `event.Bus`. Consumers receive and route them via `shared/event.Router`.
+
+### Concurrency: JSONB updates
+
+Profile data uses JSONB columns (`numbers`, `strings`). All mutations go through the `ProfileUpdate` builder, which generates per-key `jsonb_set` SQL expressions:
+
+- **`SetNumber`/`SetString`** → `jsonb_set(col, '{key}', to_jsonb(value))` — per-key overwrite
+- **`IncrNumber`** → `jsonb_set(col, '{key}', to_jsonb(COALESCE((col->>'key')::numeric, 0) + delta))` — atomic increment
+
+`Upsert` is `INSERT ... ON CONFLICT DO NOTHING` (create only). Never use full-column replacement for existing rows — it would overwrite concurrent changes.
 
 ### Package naming
 
@@ -484,33 +538,48 @@ package user
 
 type Module struct{} // Wire marker: all handlers have been set up
 
-func NewModule(_ handler.HandlersInit, _ usercontract.Init) Module {
+func NewModule(_ handler.HandlersInit, _ usercontract.Init, _ consumer.Init) Module {
     return Module{}
 }
 
-func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager, _ sharedmw.Init, _ repository.UserRepository, _ event.Bus) Module {
+func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager,
+    _ sharedmw.Init, _ repository.UserRepository, _ repository.ProfileRepository,
+    _ event.Bus, _ *pkgamqp.Broker) Module {
     wire.Build(
+        // services
         service.NewUserService,
         service.NewTokenService,
+        service.NewProfileService,
+        // usecases
         usecase.NewLoginUseCase,
         usecase.NewRefreshUseCase,
         usecase.NewGetUserUseCase,
         usecase.NewRegisterUseCase,
+        usecase.NewChangePasswordUseCase,
+        // handlers
         handler.NewLoginHandler,
         handler.NewRefreshHandler,
         handler.NewGetUserHandler,
         handler.NewRegisterHandler,
+        handler.NewChangePasswordHandler,
         handler.SetupHandlers,
+        // grpc
         usercontract.SetupUserContract,
+        // consumers
+        consumer.NewProfileUpdaterConsumer,
+        consumer.SetupConsumers,
+
         NewModule,
     )
     return Module{}
 }
 ```
 
-`NewModule` is a Wire dependency sink — it ensures all handlers and contracts are created. `SetupHandlers` and `SetupUserContract` register routes during construction.
+`NewModule` is a Wire dependency sink — it ensures all handlers, contracts, and consumers are created.
 
-`InitializeUserModule` accepts `_ sharedmw.Init` to guarantee middleware is installed before handlers are registered. `_ repository.UserRepository` is accepted as a parameter (provided externally by the application-level injector) rather than created internally.
+Wire constructors are grouped by layer: **services → usecases → handlers → consumers**. This grouping is a convention — Wire resolves dependencies by type, not by order.
+
+`InitializeUserModule` accepts `_ sharedmw.Init` to guarantee middleware is installed before handlers are registered. Repositories and infrastructure (`event.Bus`, `*pkgamqp.Broker`) are accepted as parameters provided externally by the application-level injector.
 
 ### Code generation
 
@@ -619,12 +688,72 @@ type TokenPair struct {
 }
 ```
 
+### domain/model (continued)
+
+```go
+// internal/user/domain/model/profile.go
+type Profile struct {
+    UserID  string
+    Numbers map[string]float64
+    Strings map[string]string
+}
+```
+
+```go
+// internal/user/domain/model/profile_update.go
+// Fluent builder for atomic JSONB updates (per-key jsonb_set).
+type ProfileUpdate struct {
+    NumberSets map[string]float64
+    NumberIncr map[string]float64
+    StringSets map[string]string
+}
+
+func NewProfileUpdate() *ProfileUpdate
+func (u *ProfileUpdate) SetNumber(key string, val float64) *ProfileUpdate
+func (u *ProfileUpdate) IncrNumber(key string, delta float64) *ProfileUpdate
+func (u *ProfileUpdate) SetString(key string, val string) *ProfileUpdate
+```
+
+Usage:
+```go
+upd := model.NewProfileUpdate().
+    IncrNumber("password_changes", 1).
+    SetString("status", "active")
+```
+
+### domain/event
+
+Events implement `pkg/event.Event` and optionally `event.Taggable` for headers-exchange routing:
+
+```go
+// internal/user/domain/event/user_created.go
+const UserCreated = "user.created"
+
+type UserCreatedEvent struct {
+    UserID string `json:"user_id" validate:"required,uuid"`
+    Email  string `json:"email"   validate:"required,email"`
+}
+
+func (UserCreatedEvent) EventName() string { return UserCreated }
+func (UserCreatedEvent) Tags() []string    { return []string{"profile"} }
+```
+
+```go
+// internal/user/domain/event/password_changed.go
+const PasswordChanged = "user.password_changed"
+
+type PasswordChangedEvent struct {
+    UserID string `json:"user_id" validate:"required,uuid"`
+}
+
+func (PasswordChangedEvent) EventName() string { return PasswordChanged }
+func (PasswordChangedEvent) Tags() []string    { return []string{"profile"} }
+```
+
 ### domain/repository
 
 ```go
 // internal/user/domain/repository/user.go
-package repository
-
 type UserRepository interface {
     FindByID(ctx context.Context, id string) (*model.User, error)
     FindByEmail(ctx context.Context, email string) (*model.User, error)
@@ -633,20 +762,28 @@ type UserRepository interface {
 }
 ```
 
+```go
+// internal/user/domain/repository/profile.go
+type ProfileRepository interface {
+    FindByUserID(ctx context.Context, userID string) (*model.Profile, error)
+    Upsert(ctx context.Context, profile *model.Profile) error          // INSERT ... ON CONFLICT DO NOTHING
+    Update(ctx context.Context, userID string, upd *model.ProfileUpdate) error  // per-key jsonb_set
+}
+```
+
 ### app/service
 
-Two interfaces, each with an unexported implementation:
+Domain services — interface + unexported impl:
 
 ```go
 // internal/user/app/service/user.go
-package service
-
 type UserService interface {
     FindByEmail(ctx context.Context, email string) (*model.User, error)
     FindByID(ctx context.Context, id string) (*model.User, error)
     CheckPassword(passwordHash, password string) error
     Create(ctx context.Context, user *model.User) error
     HashPassword(password string) (string, error)
+    UpdatePassword(ctx context.Context, id, hash string) error
 }
 
 func NewUserService(userRepo repository.UserRepository) UserService
@@ -654,14 +791,26 @@ func NewUserService(userRepo repository.UserRepository) UserService
 
 ```go
 // internal/user/app/service/token.go
-package service
-
 type TokenService interface {
     IssueTokenPair(userID, role string) (*model.TokenPair, error)
     ValidateRefreshToken(token string) (*jwt.Claims, error)
 }
 
 func NewTokenService(jwtManager *jwt.Manager) TokenService
+```
+
+Event-handling service — exported struct, methods match `sharedevent.Route` signature:
+
+```go
+// internal/user/app/service/profile.go
+type ProfileService struct {
+    profileRepo repository.ProfileRepository
+}
+
+func NewProfileService(pr repository.ProfileRepository) *ProfileService
+
+func (s *ProfileService) OnUserCreated(ctx context.Context, evt domainevent.UserCreatedEvent, _ pkgamqp.DeliveryMeta) error
+func (s *ProfileService) OnPasswordChanged(ctx context.Context, evt domainevent.PasswordChangedEvent, _ pkgamqp.DeliveryMeta) error
 ```
 
 ### app/usecase
@@ -739,12 +888,30 @@ func NewGetUserUseCase(us service.UserService) *GetUserUseCase
 2. Role check: admins can access any user; non-admins can only access their own profile
 3. `userService.FindByID(ctx, targetID)` — fetch user → `ErrNotFound` if missing
 
+```go
+// internal/user/app/usecase/change_password.go
+package usecase
+
+type ChangePasswordUseCase struct {
+    userService service.UserService
+    eventBus    event.Bus
+}
+
+func NewChangePasswordUseCase(us service.UserService, eb event.Bus) *ChangePasswordUseCase
+```
+
+`Execute(ctx middleware.AuthCtx, oldPassword, newPassword)` flow:
+1. `ctx.Claims()` → get userID
+2. `userService.FindByID(ctx, userID)` → load user → `ErrNotFound` if missing
+3. `userService.CheckPassword(user.PasswordHash, oldPassword)` → verify old password → `ErrInvalidCredentials`
+4. `userService.HashPassword(newPassword)` → hash new password
+5. `userService.UpdatePassword(ctx, userID, hash)` → persist
+6. `eventBus.Publish(ctx, PasswordChangedEvent{UserID})` → publish domain event
+
 ### infra/persistence
 
 ```go
 // internal/user/infra/persistence/user.go
-package persistence
-
 type userModel struct {            // unexported, bun ORM model
     bun.BaseModel `bun:"table:users"`
     ID           string `bun:"id,pk"`
@@ -756,9 +923,26 @@ type userModel struct {            // unexported, bun ORM model
 }
 
 type userRepository struct{ db *bun.DB }  // unexported
-
 func NewUserRepository(db *bun.DB) repository.UserRepository
 ```
+
+```go
+// internal/user/infra/persistence/profile.go
+type profileModel struct {
+    bun.BaseModel `bun:"table:user_profiles"`
+    UserID    string             `bun:"user_id,pk"`
+    Numbers   map[string]float64 `bun:"numbers,type:jsonb,notnull,default:'{}'"`
+    Strings   map[string]string  `bun:"strings,type:jsonb,notnull,default:'{}'"`
+    CreatedAt int64              `bun:"created_at,notnull"`
+    UpdatedAt int64              `bun:"updated_at,notnull"`
+}
+
+type profileRepository struct{ db *bun.DB }
+func NewProfileRepository(db *bun.DB) repository.ProfileRepository
+```
+
+`Upsert` uses `INSERT ... ON CONFLICT (user_id) DO NOTHING` — create only.
+`Update` builds per-key `jsonb_set` expressions from `ProfileUpdate`, ensuring concurrent modifications to different keys don't interfere.
 
 ### transport/dto
 
@@ -791,13 +975,41 @@ package handler
 
 type HandlersInit struct{}
 
-func SetupHandlers(api huma.API, loginH *LoginHandler, refreshH *RefreshHandler, getUserH *GetUserHandler, registerH *RegisterHandler) HandlersInit
+func SetupHandlers(api huma.API, loginH *LoginHandler, refreshH *RefreshHandler,
+    getUserH *GetUserHandler, registerH *RegisterHandler, changePasswordH *ChangePasswordHandler) HandlersInit
 
-// login.go    — LoginHandler, NewLoginHandler(), Register(api), handle(ctx, *loginInput)
-// refresh.go  — RefreshHandler, NewRefreshHandler(), Register(api), handle(ctx, *refreshInput)
-// register.go — RegisterHandler, NewRegisterHandler(), Register(api), handle(ctx, *registerInput)
-// get_user.go — GetUserHandler, NewGetUserHandler(), Register(api), handle(ctx, *getUserInput)
-// types.go    — tokenOutput (uses dto.TokenPairDTO as Body)
+// login.go           — LoginHandler (POST /api/v1/auth/login)
+// refresh.go         — RefreshHandler (POST /api/v1/auth/refresh)
+// register.go        — RegisterHandler (POST /api/v1/auth/register)
+// change_password.go — ChangePasswordHandler (PUT /api/v1/auth/password)
+// get_user.go        — GetUserHandler (GET /api/v1/users/{id})
+// types.go           — tokenOutput (uses dto.TokenPairDTO as Body)
+```
+
+### transport/consumer
+
+Consumers are thin AMQP wiring — no business logic. They delegate directly to service method references:
+
+```go
+// internal/user/transport/consumer/profile_updater.go
+type ProfileUpdaterConsumer struct {
+    profileSvc *service.ProfileService
+}
+
+func NewProfileUpdaterConsumer(ps *service.ProfileService) *ProfileUpdaterConsumer
+
+func (c *ProfileUpdaterConsumer) Register(b *pkgamqp.Broker) {
+    r := sharedevent.NewRouter()
+    sharedevent.Route(r, c.profileSvc.OnUserCreated)       // method reference — no wrapper
+    sharedevent.Route(r, c.profileSvc.OnPasswordChanged)   // method reference — no wrapper
+    r.Default(...)
+
+    pkgamqp.AddRawConsumer(b, pkgamqp.ConsumerConfig{
+        Queue:    "tag.profile",
+        Exchange: event.ExchangeTagged,
+        BindingArgs: amqp091.Table{"x-match": "any", "tag.profile": true},
+    }, r.Handler())
+}
 ```
 
 ### transport/contract
@@ -825,7 +1037,7 @@ func SetupUserContract(grpcSrv *grpc.Server, ur repository.UserRepository) Init
 POST /api/v1/auth/register
   Body:     { "email": string (format: email), "password": string (minLength: 6) }
   Response: { "access_token": string, "refresh_token": string }
-  Notes:    Creates a new user with role "user" and returns tokens (auto-login)
+  Notes:    Creates a new user with role "user", publishes UserCreatedEvent, returns tokens
 
 POST /api/v1/auth/login
   Body:     { "email": string (format: email), "password": string (minLength: 6) }
@@ -834,6 +1046,12 @@ POST /api/v1/auth/login
 POST /api/v1/auth/refresh
   Body:     { "refresh_token": string }
   Response: { "access_token": string, "refresh_token": string }
+
+PUT /api/v1/auth/password
+  Headers:  Authorization: Bearer <access_token>
+  Body:     { "old_password": string (minLength: 6), "new_password": string (minLength: 6) }
+  Response: 204 No Content
+  Notes:    Verifies old password, updates hash, publishes PasswordChangedEvent
 
 GET /api/v1/users/{id}
   Headers:  Authorization: Bearer <access_token>

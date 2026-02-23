@@ -14,8 +14,8 @@ import (
 //
 // Publishing:
 //
-//	broker.Publish(ctx, exchange, key, body)
-//	broker.PublishJSON(ctx, exchange, key, payload)  // with validation + marshal
+//	broker.Publish(ctx, exchange, key, headers, body)
+//	broker.PublishJSON(ctx, exchange, key, headers, payload)  // with validation + marshal
 //
 // Consuming — register handlers before calling Run:
 //
@@ -42,17 +42,17 @@ func NewBroker(conn *amqp091.Connection, poolCfg PoolConfig) *Broker {
 }
 
 // Publish sends a raw message to the given exchange with the specified routing key.
-func (b *Broker) Publish(ctx context.Context, exchange, routingKey string, body []byte, g DeliveryGuarantee) error {
+func (b *Broker) Publish(ctx context.Context, exchange, routingKey string, headers amqp091.Table, body []byte, g DeliveryGuarantee) error {
 	p, err := b.publishers.get(g)
 	if err != nil {
 		return err
 	}
 
-	return p.Publish(ctx, exchange, routingKey, body)
+	return p.Publish(ctx, exchange, routingKey, headers, body)
 }
 
 // PublishJSON validates the payload struct, marshals it to JSON, and publishes.
-func (b *Broker) PublishJSON(ctx context.Context, exchange, routingKey string, payload any, g DeliveryGuarantee) error {
+func (b *Broker) PublishJSON(ctx context.Context, exchange, routingKey string, headers amqp091.Table, payload any, g DeliveryGuarantee) error {
 	if err := validate.StructCtx(ctx, payload); err != nil {
 		return fmt.Errorf("amqp: validate: %w", err)
 	}
@@ -62,7 +62,7 @@ func (b *Broker) PublishJSON(ctx context.Context, exchange, routingKey string, p
 		return fmt.Errorf("amqp: marshal: %w", err)
 	}
 
-	return b.Publish(ctx, exchange, routingKey, body, g)
+	return b.Publish(ctx, exchange, routingKey, headers, body, g)
 }
 
 // Use appends group-level middlewares that apply to every registered consumer.

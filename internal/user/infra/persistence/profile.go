@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"starter-boilerplate/internal/user/domain/model"
@@ -44,17 +45,74 @@ func (r *profileRepository) FindByUserID(ctx context.Context, userID string) (*m
 
 func (r *profileRepository) Upsert(ctx context.Context, profile *model.Profile) error {
 	m := fromProfileEntity(profile)
-	now := time.Now().Unix()
-	m.UpdatedAt = now
 
 	_, err := r.db.NewInsert().
 		Model(m).
-		On("CONFLICT (user_id) DO UPDATE").
-		Set("numbers = EXCLUDED.numbers").
-		Set("strings = EXCLUDED.strings").
-		Set("updated_at = EXCLUDED.updated_at").
+		On("CONFLICT (user_id) DO NOTHING").
 		Exec(ctx)
 	return err
+}
+
+func (r *profileRepository) Update(ctx context.Context, userID string, upd *model.ProfileUpdate) error {
+	q := r.db.NewUpdate().
+		TableExpr("user_profiles").
+		Where("user_id = ?", userID).
+		Set("updated_at = ?", time.Now().Unix())
+
+	if expr, args := buildNumbersExpr(upd); expr != "" {
+		q = q.Set(expr, args...)
+	}
+	if expr, args := buildStringsExpr(upd); expr != "" {
+		q = q.Set(expr, args...)
+	}
+
+	_, err := q.Exec(ctx)
+	return err
+}
+
+// buildNumbersExpr builds a SET expression for the numbers JSONB column.
+// Every operation uses per-key jsonb_set so concurrent updates to different keys
+// don't interfere, and increments are atomic (read-modify-write in a single expression).
+func buildNumbersExpr(upd *model.ProfileUpdate) (string, []interface{}) {
+	if len(upd.NumberSets) == 0 && len(upd.NumberIncr) == 0 {
+		return "", nil
+	}
+
+	expr := "numbers"
+	var args []interface{}
+
+	for key, val := range upd.NumberSets {
+		expr = fmt.Sprintf("jsonb_set(%s, ?::text[], to_jsonb(?::numeric))", expr)
+		args = append(args, "{"+key+"}", val)
+	}
+
+	for key, delta := range upd.NumberIncr {
+		expr = fmt.Sprintf(
+			"jsonb_set(%s, ?::text[], to_jsonb(COALESCE((numbers->>?)::numeric, 0) + ?::numeric))",
+			expr,
+		)
+		args = append(args, "{"+key+"}", key, delta)
+	}
+
+	return "numbers = " + expr, args
+}
+
+// buildStringsExpr builds a SET expression for the strings JSONB column.
+// Uses per-key jsonb_set for safe concurrent modifications.
+func buildStringsExpr(upd *model.ProfileUpdate) (string, []interface{}) {
+	if len(upd.StringSets) == 0 {
+		return "", nil
+	}
+
+	expr := "strings"
+	var args []interface{}
+
+	for key, val := range upd.StringSets {
+		expr = fmt.Sprintf("jsonb_set(%s, ?::text[], to_jsonb(?::text))", expr)
+		args = append(args, "{"+key+"}", val)
+	}
+
+	return "strings = " + expr, args
 }
 
 func toProfileEntity(m *profileModel) *model.Profile {

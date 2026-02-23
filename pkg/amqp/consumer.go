@@ -19,17 +19,18 @@ type HandlerFunc func(ctx context.Context, msg amqp091.Delivery) error
 
 // ConsumerConfig controls queue declaration, binding, and consume behaviour.
 type ConsumerConfig struct {
-	Queue                string // required
-	Exchange             string // optional, for binding
-	RoutingKey           string // optional
-	Durable              *bool  // default: true
-	AutoDelete           bool   // default: false
-	Exclusive            bool   // default: false
-	PrefetchCount        int    // default: 1
-	Concurrency          int    // parallel goroutines per consumer, default: 1
-	RetryOnError         *bool  // nack+requeue on error, default: false
-	DeadLetterExchange   string // optional, x-dead-letter-exchange
-	DeadLetterRoutingKey string // optional, x-dead-letter-routing-key
+	Queue                string        // required
+	Exchange             string        // optional, for binding
+	RoutingKey           string        // optional
+	BindingArgs          amqp091.Table // optional, extra args for QueueBind (e.g. x-match for headers exchange)
+	Durable              *bool         // default: true
+	AutoDelete           bool          // default: false
+	Exclusive            bool          // default: false
+	PrefetchCount        int           // default: 1
+	Concurrency          int           // parallel goroutines per consumer, default: 1
+	RetryOnError         *bool         // nack+requeue on error, default: false
+	DeadLetterExchange   string        // optional, x-dead-letter-exchange
+	DeadLetterRoutingKey string        // optional, x-dead-letter-routing-key
 }
 
 func (c ConsumerConfig) durable() bool {
@@ -108,6 +109,22 @@ func typedHandler[T any](fn func(ctx context.Context, payload T, meta DeliveryMe
 		}
 		return fn(ctx, payload, newDeliveryMeta(&msg))
 	}
+}
+
+// rawHandler wraps a raw handler function into a HandlerFunc.
+// The handler receives the raw message body and DeliveryMeta without deserialization.
+func rawHandler(fn func(ctx context.Context, body []byte, meta DeliveryMeta) error) HandlerFunc {
+	return func(ctx context.Context, msg amqp091.Delivery) error {
+		return fn(ctx, msg.Body, newDeliveryMeta(&msg))
+	}
+}
+
+// Validate runs struct validation on v if it is a struct.
+func Validate(ctx context.Context, v any) error {
+	if isStruct(v) {
+		return validate.StructCtx(ctx, v)
+	}
+	return nil
 }
 
 func isStruct(v any) bool {
@@ -189,7 +206,7 @@ func (c *consumer) bind(ch *amqp091.Channel) error {
 	if c.cfg.Exchange == "" {
 		return nil
 	}
-	return ch.QueueBind(c.cfg.Queue, c.cfg.RoutingKey, c.cfg.Exchange, false, nil)
+	return ch.QueueBind(c.cfg.Queue, c.cfg.RoutingKey, c.cfg.Exchange, false, c.cfg.BindingArgs)
 }
 
 func (c *consumer) process(parent context.Context, msg amqp091.Delivery) {

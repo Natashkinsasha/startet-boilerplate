@@ -16,6 +16,7 @@ type UserService interface {
 	CheckPassword(passwordHash, password string) error
 	Create(ctx context.Context, user *model.User) error
 	HashPassword(password string) (string, error)
+	UpdatePassword(ctx context.Context, id, hash string) error
 }
 
 type userService struct {
@@ -51,4 +52,16 @@ func (s *userService) HashPassword(password string) (string, error) {
 
 func (s *userService) Create(ctx context.Context, user *model.User) error {
 	return s.userRepo.Create(ctx, user)
+}
+
+func (s *userService) UpdatePassword(ctx context.Context, id, hash string) error {
+	user, err := s.userRepo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return errs.ErrNotFound
+	}
+	user.PasswordHash = hash
+	return s.userRepo.Update(ctx, user)
 }

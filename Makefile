@@ -1,4 +1,4 @@
-.PHONY: run build wire migrate migrate-init migrate-rollback migrate-status migrate-create vet lint docker-up docker-down proto install-tools deps dev standalone swagger test test-unit test-integration test-functional
+.PHONY: run build wire migrate migrate-init migrate-rollback migrate-status migrate-create vet lint docker-up docker-down proto install-tools deps dev standalone swagger test test-unit test-integration test-functional coverage
 
 local-run:
 	APP_ENV=local go run ./cmd/api/...
@@ -35,6 +35,11 @@ test:
 	@$(MAKE) test-unit
 	@$(MAKE) test-integration
 	@$(MAKE) test-functional
+
+coverage:
+	go test ./... -tags=unit,integration,functional -coverprofile=coverage.out -count=1 2>&1 | grep -v '\[no test files\]'
+	go tool cover -func=coverage.out | tail -1
+	@echo "HTML report: go tool cover -html=coverage.out"
 
 vet:
 	go vet -tags=$(shell grep -rh '//go:build' . --include='*.go' | awk '{print $$2}' | sort -u | paste -sd,) ./...

@@ -35,10 +35,13 @@ func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manage
 	getUserHandler := handler.NewGetUserHandler(getUserUseCase)
 	registerUseCase := usecase.NewRegisterUseCase(userService, tokenService, bus)
 	registerHandler := handler.NewRegisterHandler(registerUseCase)
-	handlersInit := handler.SetupHandlers(api, loginHandler, refreshHandler, getUserHandler, registerHandler)
+	changePasswordUseCase := usecase.NewChangePasswordUseCase(userService, bus)
+	changePasswordHandler := handler.NewChangePasswordHandler(changePasswordUseCase)
+	handlersInit := handler.SetupHandlers(api, loginHandler, refreshHandler, getUserHandler, registerHandler, changePasswordHandler)
 	contractInit := contract.SetupUserContract(grpcSrv, userRepository)
-	profileCreatedConsumer := consumer.NewProfileCreatedConsumer(profileRepository)
-	consumerInit := consumer.SetupConsumers(broker, profileCreatedConsumer)
+	profileService := service.NewProfileService(profileRepository)
+	profileUpdaterConsumer := consumer.NewProfileUpdaterConsumer(profileService)
+	consumerInit := consumer.SetupConsumers(broker, profileUpdaterConsumer)
 	module := NewModule(handlersInit, contractInit, consumerInit)
 	return module
 }

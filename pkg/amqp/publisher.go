@@ -9,7 +9,7 @@ import (
 
 // publisher is the internal interface for message publishing.
 type publisher interface {
-	Publish(ctx context.Context, exchange, routingKey string, body []byte) error
+	Publish(ctx context.Context, exchange, routingKey string, headers amqp091.Table, body []byte) error
 	Close() error
 }
 
@@ -36,8 +36,9 @@ func (p *fireAndForgetPublisher) Close() error {
 	return p.ch.Close()
 }
 
-func (p *fireAndForgetPublisher) Publish(ctx context.Context, exchange, routingKey string, body []byte) error {
+func (p *fireAndForgetPublisher) Publish(ctx context.Context, exchange, routingKey string, headers amqp091.Table, body []byte) error {
 	return p.ch.PublishWithContext(ctx, exchange, routingKey, false, false, amqp091.Publishing{
+		Headers:     headers,
 		ContentType: "application/json",
 		Body:        body,
 	})
@@ -72,8 +73,9 @@ func (p *confirmedPublisher) Close() error {
 	return p.ch.Close()
 }
 
-func (p *confirmedPublisher) Publish(ctx context.Context, exchange, routingKey string, body []byte) error {
+func (p *confirmedPublisher) Publish(ctx context.Context, exchange, routingKey string, headers amqp091.Table, body []byte) error {
 	conf, err := p.ch.PublishWithDeferredConfirmWithContext(ctx, exchange, routingKey, false, false, amqp091.Publishing{
+		Headers:      headers,
 		ContentType:  "application/json",
 		DeliveryMode: amqp091.Persistent,
 		Body:         body,

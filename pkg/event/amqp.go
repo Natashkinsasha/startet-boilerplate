@@ -11,6 +11,7 @@ import (
 
 const (
 	ExchangeEvents = "events"
+	ExchangeTagged = "events.tagged"
 	ExchangeDLX    = "dlx"
 )
 
@@ -41,6 +42,9 @@ func NewEventBus(conn *amqp091.Connection, broker *pkgamqp.Broker) Bus {
 		if err := declareExchange(conn, ExchangeEvents); err != nil {
 			panic(fmt.Sprintf("event bus: declare exchange: %v", err))
 		}
+		if err := declareTaggedExchange(conn); err != nil {
+			panic(fmt.Sprintf("event bus: declare tagged exchange: %v", err))
+		}
 	}
 	return NewAMQPBus(broker, ExchangeEvents)
 }
@@ -54,6 +58,30 @@ func declareExchange(conn *amqp091.Connection, name string) error {
 	return ch.ExchangeDeclare(name, "topic", true, false, false, false, nil)
 }
 
+func declareTaggedExchange(conn *amqp091.Connection) error {
+	ch, err := conn.Channel()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = ch.Close() }()
+
+	if err := ch.ExchangeDeclare(ExchangeTagged, "headers", true, false, false, false, nil); err != nil {
+		return err
+	}
+	// Exchange-to-exchange binding: forward all messages from events → events.tagged.
+	return ch.ExchangeBind(ExchangeTagged, "#", ExchangeEvents, false, nil)
+}
+
 func (b *AMQPBus) Publish(ctx context.Context, e Event) error {
-	return b.broker.PublishJSON(ctx, b.exchange, e.EventName(), e, pkgamqp.AtLeastOnce)
+	var headers amqp091.Table
+	if t, ok := e.(Taggable); ok {
+		tags := t.Tags()
+		if len(tags) > 0 {
+			headers = make(amqp091.Table, len(tags))
+			for _, tag := range tags {
+				headers["tag."+tag] = true
+			}
+		}
+	}
+	return b.broker.PublishJSON(ctx, b.exchange, e.EventName(), headers, e, pkgamqp.AtLeastOnce)
 }
