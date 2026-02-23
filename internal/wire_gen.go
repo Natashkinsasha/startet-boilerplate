@@ -53,7 +53,7 @@ func InitializeApp(ctx context.Context) *app.App {
 	profileRepository := persistence.NewProfileRepository(bunDB)
 	amqpConfig := configConfig.AMQP
 	connection := amqp.Setup(amqpConfig, slogLogger)
-	broker := consumer.Setup(connection)
+	broker := consumer.Setup(connection, amqpConfig)
 	bus := event.NewEventBus(connection, broker)
 	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init, userRepository, profileRepository, bus, broker)
 	redisConfig := configConfig.Redis

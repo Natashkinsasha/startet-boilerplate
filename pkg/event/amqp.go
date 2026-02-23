@@ -21,8 +21,15 @@ type AMQPBus struct {
 	exchange string
 }
 
-func NewAMQPBus(broker *pkgamqp.Broker, exchange string) *AMQPBus {
-	return &AMQPBus{broker: broker, exchange: exchange}
+// AMQPBusOption configures an AMQPBus.
+type AMQPBusOption func(*AMQPBus)
+
+func NewAMQPBus(broker *pkgamqp.Broker, exchange string, opts ...AMQPBusOption) *AMQPBus {
+	b := &AMQPBus{broker: broker, exchange: exchange}
+	for _, o := range opts {
+		o(b)
+	}
+	return b
 }
 
 // NewEventBus is a Wire provider that creates a Bus backed by AMQP
@@ -48,5 +55,5 @@ func declareExchange(conn *amqp091.Connection, name string) error {
 }
 
 func (b *AMQPBus) Publish(ctx context.Context, e Event) error {
-	return b.broker.PublishJSON(ctx, b.exchange, e.EventName(), e)
+	return b.broker.PublishJSON(ctx, b.exchange, e.EventName(), e, pkgamqp.AtLeastOnce)
 }

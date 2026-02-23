@@ -2,7 +2,8 @@ package amqp
 
 import (
 	"context"
-	"log/slog"
+	"encoding/json"
+	"fmt"
 
 	amqp091 "github.com/rabbitmq/amqp091-go"
 )
@@ -25,27 +26,43 @@ import (
 // Standalone mode: if conn is nil, Publish returns an error
 // and Run blocks until ctx is done without starting consumers.
 type Broker struct {
-	publisher *publisher
-	consumers *consumerGroup
+	publishers *publisherManager
+	consumers  *consumerGroup
 }
 
 // NewBroker creates a ready-to-use Broker backed by the given connection.
 // Pass nil for standalone mode (no AMQP server required).
-func NewBroker(conn *amqp091.Connection) *Broker {
+func NewBroker(conn *amqp091.Connection, poolCfg PoolConfig) *Broker {
+	poolCfg = poolCfg.withDefaults()
+
 	return &Broker{
-		publisher: newPublisher(conn),
-		consumers: newConsumerGroup(conn),
+		publishers: newPublisherManager(conn, poolCfg),
+		consumers:  newConsumerGroup(conn),
 	}
 }
 
 // Publish sends a raw message to the given exchange with the specified routing key.
-func (b *Broker) Publish(ctx context.Context, exchange, routingKey string, body []byte) error {
-	return b.publisher.Publish(ctx, exchange, routingKey, body)
+func (b *Broker) Publish(ctx context.Context, exchange, routingKey string, body []byte, g DeliveryGuarantee) error {
+	p, err := b.publishers.get(g)
+	if err != nil {
+		return err
+	}
+
+	return p.Publish(ctx, exchange, routingKey, body)
 }
 
 // PublishJSON validates the payload struct, marshals it to JSON, and publishes.
-func (b *Broker) PublishJSON(ctx context.Context, exchange, routingKey string, payload any) error {
-	return b.publisher.PublishJSON(ctx, exchange, routingKey, payload)
+func (b *Broker) PublishJSON(ctx context.Context, exchange, routingKey string, payload any, g DeliveryGuarantee) error {
+	if err := validate.StructCtx(ctx, payload); err != nil {
+		return fmt.Errorf("amqp: validate: %w", err)
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("amqp: marshal: %w", err)
+	}
+
+	return b.Publish(ctx, exchange, routingKey, body, g)
 }
 
 // Use appends group-level middlewares that apply to every registered consumer.
@@ -62,11 +79,8 @@ func (b *Broker) Run(ctx context.Context) error {
 }
 
 // Shutdown gracefully stops consumers (no new deliveries, in-flight handlers finish)
-// and closes the publisher channel.
+// and closes all publisher channels.
 func (b *Broker) Shutdown() {
 	b.consumers.Shutdown()
-
-	if err := b.publisher.Close(); err != nil {
-		slog.Error("failed to close publisher", slog.Any("error", err))
-	}
+	b.publishers.closeAll()
 }
