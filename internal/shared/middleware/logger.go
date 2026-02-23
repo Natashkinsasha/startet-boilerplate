@@ -1,11 +1,11 @@
 package middleware
 
 import (
+	"log/slog"
 	"net"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"go.uber.org/zap"
 )
 
 func newLoggerMiddleware() func(huma.Context, func(huma.Context)) {
@@ -25,22 +25,22 @@ func newLoggerMiddleware() func(huma.Context, func(huma.Context)) {
 		}
 
 		u := ctx.URL()
-		fields := []zap.Field{
-			zap.String("method", ctx.Method()),
-			zap.String("path", u.Path),
-			zap.Int("status", status),
-			zap.Duration("latency", time.Since(start)),
-			zap.String("ip", ip),
-			zap.String("request_id", RequestIDFromContext(ctx.Context())),
+		attrs := []any{
+			slog.String("method", ctx.Method()),
+			slog.String("path", u.Path),
+			slog.Int("status", status),
+			slog.Duration("latency", time.Since(start)),
+			slog.String("ip", ip),
+			slog.String("request_id", RequestIDFromContext(ctx.Context())),
 		}
 
 		switch {
 		case status >= 500:
-			zap.L().Error("http request", fields...)
+			slog.Error("http request", attrs...)
 		case status >= 400:
-			zap.L().Warn("http request", fields...)
+			slog.Warn("http request", attrs...)
 		default:
-			zap.L().Info("http request", fields...)
+			slog.Info("http request", attrs...)
 		}
 	}
 }

@@ -5,11 +5,13 @@ import (
 	"os"
 	"time"
 
-	shareddb "starter-boilerplate/internal/shared/db"
-	sharedgrpc "starter-boilerplate/internal/shared/grpc"
+	pkgamqp "starter-boilerplate/pkg/amqp"
+	pkgdb "starter-boilerplate/pkg/db"
+	pkggrpc "starter-boilerplate/pkg/grpc"
+	pkgredis "starter-boilerplate/pkg/redis"
+
 	sharedjwt "starter-boilerplate/internal/shared/jwt"
 	sharedlogger "starter-boilerplate/internal/shared/logger"
-	sharedredis "starter-boilerplate/internal/shared/redis"
 
 	"github.com/go-playground/validator/v10"
 	"gopkg.in/yaml.v3"
@@ -28,10 +30,11 @@ type AppConfig struct {
 type Config struct {
 	App    AppConfig                 `yaml:"app"`
 	Logger sharedlogger.LoggerConfig `yaml:"logger"`
-	DB     shareddb.DBConfig         `yaml:"db"`
-	Redis  sharedredis.RedisConfig   `yaml:"redis"`
+	DB     pkgdb.DBConfig            `yaml:"db"`
+	Redis  pkgredis.RedisConfig      `yaml:"redis"`
 	JWT    sharedjwt.JWTConfig       `yaml:"jwt"`
-	GRPC   sharedgrpc.GRPCConfig     `yaml:"grpc"`
+	GRPC   pkggrpc.GRPCConfig        `yaml:"grpc"`
+	AMQP   pkgamqp.AMQPConfig        `yaml:"amqp"`
 }
 
 func SetupConfig() *Config {

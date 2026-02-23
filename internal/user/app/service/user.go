@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	apperror "starter-boilerplate/internal/shared/error"
+	"starter-boilerplate/internal/shared/errs"
 	"starter-boilerplate/internal/user/domain/model"
 	"starter-boilerplate/internal/user/domain/repository"
 
@@ -36,7 +36,7 @@ func (s *userService) FindByID(ctx context.Context, id string) (*model.User, err
 
 func (s *userService) CheckPassword(passwordHash, password string) error {
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
-		return apperror.ErrInvalidCredentials
+		return errs.ErrInvalidCredentials
 	}
 	return nil
 }

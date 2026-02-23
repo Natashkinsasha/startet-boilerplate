@@ -1,19 +1,18 @@
 package logger
 
 import (
-	pkglogger "starter-boilerplate/pkg/logger"
+	"log/slog"
 
-	"go.uber.org/zap"
+	pkglogger "starter-boilerplate/pkg/logger"
 )
 
 type LoggerConfig struct {
-	Format          string `yaml:"format"`           // json | console
-	Level           string `yaml:"level"`            // debug | info | warn | error
-	StacktraceLevel string `yaml:"stacktrace_level"` // debug | info | warn | error | off
+	Format string `yaml:"format"` // json | console
+	Level  string `yaml:"level"`  // debug | info | warn | error
 }
 
 func SetupLogger(cfg LoggerConfig) *pkglogger.Logger {
-	log := pkglogger.SetupLogger(cfg.Format, cfg.Level, cfg.StacktraceLevel)
-	zap.ReplaceGlobals(log)
+	log := pkglogger.SetupLogger(cfg.Format, cfg.Level)
+	slog.SetDefault(log)
 	return log
 }

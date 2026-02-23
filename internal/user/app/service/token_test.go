@@ -49,5 +49,5 @@ func TestValidateRefreshToken_Invalid(t *testing.T) {
 
 	_, err := svc.ValidateRefreshToken("garbage-token")
 
-	assert.EqualError(t, err, "invalid refresh token")
+	assert.EqualError(t, err, "invalid token")
 }

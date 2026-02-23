@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -11,7 +12,6 @@ import (
 	"starter-boilerplate/internal/shared/config"
 
 	gohuma "github.com/danielgtaylor/huma/v2"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	gogrpc "google.golang.org/grpc"
 )
@@ -21,16 +21,18 @@ type App struct {
 	GRPCServer *gogrpc.Server
 	Config     *config.Config
 	Api        gohuma.API
+	Consumers  []func(ctx context.Context) error
 	ready      chan struct{}
 	startErr   chan error
 }
 
-func New(httpSrv *http.Server, cfg *config.Config, grpcSrv *gogrpc.Server, api gohuma.API) *App {
+func New(httpSrv *http.Server, cfg *config.Config, grpcSrv *gogrpc.Server, api gohuma.API, consumers []func(ctx context.Context) error) *App {
 	return &App{
 		HTTPServer: httpSrv,
 		GRPCServer: grpcSrv,
 		Config:     cfg,
 		Api:        api,
+		Consumers:  consumers,
 		ready:      make(chan struct{}),
 		startErr:   make(chan error, 1),
 	}
@@ -72,7 +74,7 @@ func (a *App) Run(ctx context.Context) error {
 	g, gCtx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		zap.L().Info("http server started", zap.Int("port", a.Config.App.Port))
+		slog.Info("http server started", slog.Int("port", a.Config.App.Port))
 		if err := a.HTTPServer.Serve(httpLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("http server: %w", err)
 		}
@@ -80,12 +82,18 @@ func (a *App) Run(ctx context.Context) error {
 	})
 
 	g.Go(func() error {
-		zap.L().Info("grpc server started", zap.Int("port", a.Config.GRPC.Port))
+		slog.Info("grpc server started", slog.Int("port", a.Config.GRPC.Port))
 		if err := a.GRPCServer.Serve(grpcLn); err != nil {
 			return fmt.Errorf("grpc server: %w", err)
 		}
 		return nil
 	})
+
+	for _, c := range a.Consumers {
+		g.Go(func() error {
+			return c(gCtx)
+		})
+	}
 
 	g.Go(func() error {
 		<-gCtx.Done()
@@ -96,7 +104,7 @@ func (a *App) Run(ctx context.Context) error {
 }
 
 func (a *App) shutdown() error {
-	zap.L().Info("shutting down servers...")
+	slog.Info("shutting down servers...")
 
 	timeout := a.Config.App.ShutdownTimeout
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -108,7 +116,7 @@ func (a *App) shutdown() error {
 		if err := a.HTTPServer.Shutdown(ctx); err != nil {
 			return fmt.Errorf("http shutdown: %w", err)
 		}
-		zap.L().Info("http server stopped")
+		slog.Info("http server stopped")
 		return nil
 	})
 
@@ -124,9 +132,9 @@ func (a *App) shutdown() error {
 
 		select {
 		case <-stopped:
-			zap.L().Info("grpc server stopped gracefully")
+			slog.Info("grpc server stopped gracefully")
 		case <-t.C:
-			zap.L().Warn("grpc server shutdown timed out, forcing stop")
+			slog.Warn("grpc server shutdown timed out, forcing stop")
 			a.GRPCServer.Stop()
 		}
 		return nil

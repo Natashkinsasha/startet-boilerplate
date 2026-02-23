@@ -2,11 +2,11 @@ package huma
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 
 	gohuma "github.com/danielgtaylor/huma/v2"
-	"go.uber.org/zap"
 )
 
 func GenerateSpecFile(api gohuma.API) {
@@ -14,19 +14,19 @@ func GenerateSpecFile(api gohuma.API) {
 
 	spec, err := json.MarshalIndent(api.OpenAPI(), "", "  ")
 	if err != nil {
-		zap.L().Error("failed to marshal openapi spec", zap.Error(err))
+		slog.Error("failed to marshal openapi spec", slog.Any("error", err))
 		return
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		zap.L().Error("failed to create docs dir", zap.Error(err))
+		slog.Error("failed to create docs dir", slog.Any("error", err))
 		return
 	}
 
 	if err := os.WriteFile(path, spec, 0o644); err != nil {
-		zap.L().Error("failed to write swagger spec", zap.Error(err))
+		slog.Error("failed to write swagger spec", slog.Any("error", err))
 		return
 	}
 
-	zap.L().Info("swagger spec written", zap.String("path", path))
+	slog.Info("swagger spec written", slog.String("path", path))
 }

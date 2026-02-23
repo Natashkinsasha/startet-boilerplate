@@ -5,20 +5,24 @@ import (
 
 	"github.com/google/uuid"
 
-	apperror "starter-boilerplate/internal/shared/error"
+	"starter-boilerplate/internal/shared/errs"
 	"starter-boilerplate/internal/user/app/service"
+	"starter-boilerplate/internal/user/domain"
 	"starter-boilerplate/internal/user/domain/model"
+	"starter-boilerplate/pkg/event"
 )
 
 type RegisterUseCase struct {
 	userService  service.UserService
 	tokenService service.TokenService
+	eventBus     event.Bus
 }
 
-func NewRegisterUseCase(us service.UserService, ts service.TokenService) *RegisterUseCase {
+func NewRegisterUseCase(us service.UserService, ts service.TokenService, eb event.Bus) *RegisterUseCase {
 	return &RegisterUseCase{
 		userService:  us,
 		tokenService: ts,
+		eventBus:     eb,
 	}
 }
 
@@ -28,7 +32,7 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, email, password string) 
 		return nil, err
 	}
 	if existing != nil {
-		return nil, apperror.ErrEmailAlreadyExists
+		return nil, errs.ErrEmailAlreadyExists
 	}
 
 	hash, err := uc.userService.HashPassword(password)
@@ -44,6 +48,13 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, email, password string) 
 	}
 
 	if err := uc.userService.Create(ctx, user); err != nil {
+		return nil, err
+	}
+
+	if err := uc.eventBus.Publish(ctx, domain.UserCreatedEvent{
+		UserID: user.ID,
+		Email:  user.Email,
+	}); err != nil {
 		return nil, err
 	}
 

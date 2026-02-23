@@ -1,7 +1,7 @@
 package usecase
 
 import (
-	apperror "starter-boilerplate/internal/shared/error"
+	"starter-boilerplate/internal/shared/errs"
 	"starter-boilerplate/internal/shared/middleware"
 	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/internal/user/domain/model"
@@ -18,7 +18,7 @@ func NewGetUserUseCase(us service.UserService) *GetUserUseCase {
 func (uc *GetUserUseCase) Execute(ctx middleware.AuthCtx, targetID string) (*model.User, error) {
 	claims := ctx.Claims()
 	if claims.Role != "admin" && claims.UserID != targetID {
-		return nil, apperror.ErrAccessDenied
+		return nil, errs.ErrAccessDenied
 	}
 
 	u, err := uc.userService.FindByID(ctx, targetID)
@@ -26,7 +26,7 @@ func (uc *GetUserUseCase) Execute(ctx middleware.AuthCtx, targetID string) (*mod
 		return nil, err
 	}
 	if u == nil {
-		return nil, apperror.ErrNotFound
+		return nil, errs.ErrNotFound
 	}
 	return u, nil
 }

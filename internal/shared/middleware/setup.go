@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -8,7 +9,6 @@ import (
 	"starter-boilerplate/pkg/jwt"
 
 	"github.com/danielgtaylor/huma/v2"
-	"go.uber.org/zap"
 )
 
 type Init struct{}
@@ -25,7 +25,7 @@ func Setup(srv *http.Server, api huma.API, jwtManager *jwt.Manager, userLoaderCr
 	// HTTP-level middleware
 	srv.Handler = WithCORS(WithRecover(srv.Handler))
 
-	zap.L().Info("middlewares installed")
+	slog.Info("middlewares installed")
 
 	return Init{}
 }
@@ -47,10 +47,10 @@ func WithRecover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				zap.L().Error("panic recovered",
-					zap.Any("error", err),
-					zap.String("method", r.Method),
-					zap.String("path", r.URL.Path),
+				slog.Error("panic recovered",
+					slog.Any("error", err),
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
 				)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)

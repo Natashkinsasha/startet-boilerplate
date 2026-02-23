@@ -16,12 +16,13 @@ import (
 	"starter-boilerplate/internal/user/domain/repository"
 	"starter-boilerplate/internal/user/transport/contract"
 	"starter-boilerplate/internal/user/transport/handler"
+	"starter-boilerplate/pkg/event"
 	"starter-boilerplate/pkg/jwt"
 )
 
 // Injectors from initialize.go:
 
-func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manager *jwt.Manager, init middleware.Init, userRepository repository.UserRepository) Module {
+func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manager *jwt.Manager, init middleware.Init, userRepository repository.UserRepository, bus event.Bus) Module {
 	userService := service.NewUserService(userRepository)
 	tokenService := service.NewTokenService(manager)
 	loginUseCase := usecase.NewLoginUseCase(userService, tokenService)
@@ -30,7 +31,7 @@ func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manage
 	refreshHandler := handler.NewRefreshHandler(refreshUseCase)
 	getUserUseCase := usecase.NewGetUserUseCase(userService)
 	getUserHandler := handler.NewGetUserHandler(getUserUseCase)
-	registerUseCase := usecase.NewRegisterUseCase(userService, tokenService)
+	registerUseCase := usecase.NewRegisterUseCase(userService, tokenService, bus)
 	registerHandler := handler.NewRegisterHandler(registerUseCase)
 	handlersInit := handler.SetupHandlers(api, loginHandler, refreshHandler, getUserHandler, registerHandler)
 	contractInit := contract.SetupUserContract(grpcSrv, userRepository)

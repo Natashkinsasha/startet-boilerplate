@@ -2,12 +2,11 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/signal"
 	"starter-boilerplate/internal"
 	"syscall"
-
-	"go.uber.org/zap"
 )
 
 func main() {
@@ -17,6 +16,7 @@ func main() {
 	app := internal.InitializeApp(ctx)
 
 	if err := app.Run(ctx); err != nil {
-		zap.L().Fatal("server error", zap.Error(err))
+		slog.Error("server error", slog.Any("error", err))
+		os.Exit(1)
 	}
 }

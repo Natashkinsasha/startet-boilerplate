@@ -3,7 +3,7 @@ package usecase
 import (
 	"context"
 
-	apperror "starter-boilerplate/internal/shared/error"
+	"starter-boilerplate/internal/shared/errs"
 	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/internal/user/domain/model"
 )
@@ -31,7 +31,7 @@ func (uc *RefreshUseCase) Execute(ctx context.Context, refreshToken string) (*mo
 		return nil, err
 	}
 	if u == nil {
-		return nil, apperror.ErrNotFound
+		return nil, errs.ErrNotFound
 	}
 
 	return uc.tokenService.IssueTokenPair(u.ID, string(u.Role))

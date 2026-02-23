@@ -35,6 +35,7 @@ type FunctionalSuite struct {
 	PgPassword   string // default: "testpass"
 	PgPort       string // default: "15432"
 	RedisPort    string // default: "16379"
+	AMQPPort     string // default: "15672"
 	TestPassword string // default: "P@ssw0rd123"
 	FixtureDir   string // required, e.g. "tests/functional/testdata/fixtures"
 }
@@ -52,6 +53,7 @@ func (s *FunctionalSuite) SetupSuite() {
 	s.PgPassword = defaultVal(s.PgPassword, "testpass")
 	s.PgPort = defaultVal(s.PgPort, "15432")
 	s.RedisPort = defaultVal(s.RedisPort, "16379")
+	s.AMQPPort = defaultVal(s.AMQPPort, "15673")
 	s.TestPassword = defaultVal(s.TestPassword, "P@ssw0rd123")
 
 	s.Require().NotEmpty(s.FixtureDir, "FixtureDir must be set before running the suite")
@@ -76,6 +78,9 @@ func (s *FunctionalSuite) SetupSuite() {
 		},
 		&testcontainer.RedisContainer{
 			HostPort: s.RedisPort,
+		},
+		&testcontainer.AMQPContainer{
+			HostPort: s.AMQPPort,
 		},
 	)
 	s.Require().NoError(err, "setup containers")

@@ -63,6 +63,6 @@ func TestRefresh_UserNotFound(t *testing.T) {
 	result, err := uc.Execute(context.Background(), "valid-token")
 
 	assert.Nil(t, result)
-	assert.EqualError(t, err, "user not found")
+	assert.EqualError(t, err, "not found")
 	tokenSvc.AssertNotCalled(t, "IssueTokenPair")
 }

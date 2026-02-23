@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
-	"go.uber.org/zap"
 )
 
 type DBConfig struct {
@@ -30,10 +30,10 @@ func (d DBConfig) dsn() string {
 }
 
 // Setup creates a new bun.DB connection.
-// *zap.Logger parameter ensures Wire initializes the logger before the database.
-func Setup(ctx context.Context, cfg DBConfig, _ *zap.Logger) *bun.DB {
+// *slog.Logger parameter ensures Wire initializes the logger before the database.
+func Setup(ctx context.Context, cfg DBConfig, _ *slog.Logger) *bun.DB {
 	if cfg.Standalone {
-		zap.L().Warn("standalone mode: skipping database connection")
+		slog.Warn("standalone mode: skipping database connection")
 		return nil
 	}
 
@@ -48,7 +48,7 @@ func Setup(ctx context.Context, cfg DBConfig, _ *zap.Logger) *bun.DB {
 		panic("failed to connect to database: " + err.Error())
 	}
 
-	zap.L().Info("postgres connected", zap.String("host", cfg.Host), zap.Int("port", cfg.Port), zap.String("db", cfg.Name))
+	slog.Info("postgres connected", slog.String("host", cfg.Host), slog.Int("port", cfg.Port), slog.String("db", cfg.Name))
 
 	return db
 }

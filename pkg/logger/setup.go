@@ -1,46 +1,44 @@
 package logger
 
 import (
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"io"
+	"log/slog"
+	"os"
+	"strings"
 )
 
-type Logger = zap.Logger
+type Logger = slog.Logger
 
-func SetupLogger(format, level, stacktraceLevel string) *Logger {
-	var cfg zap.Config
+func SetupLogger(format, level string) *Logger {
+	lvl := parseLevel(level)
+	opts := &slog.HandlerOptions{
+		Level:     lvl,
+		AddSource: true,
+	}
 
+	var handler slog.Handler
 	if format == "json" {
-		cfg = zap.NewProductionConfig()
+		handler = slog.NewJSONHandler(os.Stdout, opts)
 	} else {
-		cfg = zap.NewDevelopmentConfig()
-		cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+		handler = slog.NewTextHandler(os.Stdout, opts)
 	}
 
-	if lvl, err := zapcore.ParseLevel(level); err == nil {
-		cfg.Level = zap.NewAtomicLevelAt(lvl)
-	}
-
-	var opts []zap.Option
-	switch stacktraceLevel {
-	case "off":
-		cfg.DisableStacktrace = true
-	case "":
-		// keep defaults
-	default:
-		if lvl, err := zapcore.ParseLevel(stacktraceLevel); err == nil {
-			opts = append(opts, zap.AddStacktrace(lvl))
-		}
-	}
-
-	logger, err := cfg.Build(opts...)
-	if err != nil {
-		panic("failed to initialize logger: " + err.Error())
-	}
-
-	return logger
+	return slog.New(handler)
 }
 
 func NewNop() *Logger {
-	return zap.NewNop()
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func parseLevel(s string) slog.Level {
+	switch strings.ToLower(s) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }

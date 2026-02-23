@@ -3,11 +3,11 @@ package grpc
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
-	apperror "starter-boilerplate/internal/shared/error"
+	"starter-boilerplate/pkg/apperror"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -25,9 +25,9 @@ func ErrorInterceptor() grpc.UnaryServerInterceptor {
 			return nil, status.Error(httpToGRPC(appErr.Status), appErr.Message)
 		}
 
-		zap.L().Error("internal error",
-			zap.String("method", info.FullMethod),
-			zap.Error(err),
+		slog.Error("internal error",
+			slog.String("method", info.FullMethod),
+			slog.Any("error", err),
 		)
 		return nil, status.Error(codes.Internal, "internal server error")
 	}

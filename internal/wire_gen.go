@@ -9,23 +9,27 @@ package internal
 import (
 	"context"
 	huma2 "github.com/danielgtaylor/huma/v2"
+	"github.com/rabbitmq/amqp091-go"
 	redis2 "github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 	grpc2 "google.golang.org/grpc"
+	"log/slog"
 	"net/http"
 	"starter-boilerplate/internal/shared/app"
 	"starter-boilerplate/internal/shared/config"
-	"starter-boilerplate/internal/shared/db"
-	"starter-boilerplate/internal/shared/grpc"
 	"starter-boilerplate/internal/shared/huma"
 	"starter-boilerplate/internal/shared/jwt"
 	"starter-boilerplate/internal/shared/logger"
 	"starter-boilerplate/internal/shared/middleware"
-	"starter-boilerplate/internal/shared/redis"
 	"starter-boilerplate/internal/shared/server"
 	"starter-boilerplate/internal/user"
 	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/internal/user/infra/persistence"
+	"starter-boilerplate/internal/user/transport/consumer"
+	"starter-boilerplate/pkg/amqp"
+	"starter-boilerplate/pkg/db"
+	"starter-boilerplate/pkg/event"
+	"starter-boilerplate/pkg/grpc"
+	"starter-boilerplate/pkg/redis"
 )
 
 // Injectors from initialize.go:
@@ -37,25 +41,31 @@ func InitializeApp(ctx context.Context) *app.App {
 	httpServer := server.SetupHTTPServer(serveMux, appConfig)
 	dbConfig := configConfig.DB
 	loggerConfig := configConfig.Logger
-	zapLogger := logger.SetupLogger(loggerConfig)
-	bunDB := db.Setup(ctx, dbConfig, zapLogger)
+	slogLogger := logger.SetupLogger(loggerConfig)
+	bunDB := db.Setup(ctx, dbConfig, slogLogger)
 	api := huma.Setup(serveMux, appConfig)
 	grpcConfig := configConfig.GRPC
-	grpcServer := grpc.Setup(grpcConfig, zapLogger)
+	grpcServer := grpc.Setup(grpcConfig, slogLogger)
 	jwtConfig := configConfig.JWT
 	manager := jwt.NewJWTManager(jwtConfig)
 	userRepository := persistence.NewUserRepository(bunDB)
 	userLoaderCreator := service.NewUserLoaderCreator(userRepository)
 	init := middleware.Setup(httpServer, api, manager, userLoaderCreator)
-	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init, userRepository)
+	amqpConfig := configConfig.AMQP
+	connection := amqp.Setup(amqpConfig, slogLogger)
+	publisher := amqp.NewPublisher(connection)
+	bus := event.NewEventBus(publisher)
+	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init, userRepository, bus)
 	redisConfig := configConfig.Redis
-	client := redis.Setup(ctx, redisConfig, zapLogger)
-	appApp := newApp(httpServer, configConfig, module, zapLogger, client, grpcServer, api)
+	client := redis.Setup(ctx, redisConfig, slogLogger)
+	runner := consumer.SetupConsumers(connection)
+	appApp := newApp(httpServer, configConfig, module, slogLogger, client, connection, publisher, grpcServer, api, runner)
 	return appApp
 }
 
 // initialize.go:
 
-func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *zap.Logger, _ *redis2.Client, grpcSrv *grpc2.Server, api huma2.API) *app.App {
-	return app.New(httpSrv, cfg, grpcSrv, api)
+func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *slog.Logger, _ *redis2.Client, _ *amqp091.Connection, _ *amqp.Publisher, grpcSrv *grpc2.Server, api huma2.API, consumerRunner consumer.Runner) *app.App {
+	consumers := []func(ctx context.Context) error{(func(ctx context.Context) error)(consumerRunner)}
+	return app.New(httpSrv, cfg, grpcSrv, api, consumers)
 }

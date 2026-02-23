@@ -2,10 +2,10 @@ package redis
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 )
 
 type RedisConfig struct {
@@ -17,10 +17,10 @@ type RedisConfig struct {
 }
 
 // Setup creates a new Redis client.
-// *zap.Logger parameter ensures Wire initializes the logger before Redis.
-func Setup(ctx context.Context, cfg RedisConfig, _ *zap.Logger) *goredis.Client {
+// *slog.Logger parameter ensures Wire initializes the logger before Redis.
+func Setup(ctx context.Context, cfg RedisConfig, _ *slog.Logger) *goredis.Client {
 	if cfg.Standalone {
-		zap.L().Warn("standalone mode: skipping redis connection")
+		slog.Warn("standalone mode: skipping redis connection")
 		return nil
 	}
 
@@ -37,7 +37,7 @@ func Setup(ctx context.Context, cfg RedisConfig, _ *zap.Logger) *goredis.Client 
 		panic("failed to connect to redis: " + err.Error())
 	}
 
-	zap.L().Info("redis connected", zap.String("addr", cfg.Addr))
+	slog.Info("redis connected", slog.String("addr", cfg.Addr))
 
 	return client
 }

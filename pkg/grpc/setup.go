@@ -1,7 +1,8 @@
 package grpc
 
 import (
-	"go.uber.org/zap"
+	"log/slog"
+
 	"google.golang.org/grpc"
 )
 
@@ -10,9 +11,9 @@ type GRPCConfig struct {
 }
 
 // Setup creates a new gRPC server.
-// *zap.Logger parameter ensures Wire initializes the logger before gRPC.
-func Setup(cfg GRPCConfig, _ *zap.Logger) *grpc.Server {
-	zap.L().Info("grpc server created", zap.Int("port", cfg.Port))
+// *slog.Logger parameter ensures Wire initializes the logger before gRPC.
+func Setup(cfg GRPCConfig, _ *slog.Logger) *grpc.Server {
+	slog.Info("grpc server created", slog.Int("port", cfg.Port))
 	return grpc.NewServer(
 		grpc.UnaryInterceptor(ErrorInterceptor()),
 	)
