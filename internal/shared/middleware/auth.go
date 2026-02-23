@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"starter-boilerplate/pkg/jwt"
 
@@ -50,15 +51,33 @@ func requiresBearerAuth(op *huma.Operation) bool {
 	return false
 }
 
-func ClaimsFromContext(ctx context.Context) *jwt.Claims {
-	claims, ok := ctx.Value(claimsContextKey{}).(*jwt.Claims)
-	if !ok || claims == nil {
-		panic("ClaimsFromContext: no claims in context — is bearerAuth set on this operation?")
-	}
-	return claims
+type AuthCtx interface {
+	context.Context
+	Claims() *jwt.Claims
 }
 
-func ClaimsFromContextSafe(ctx context.Context) (*jwt.Claims, bool) {
+type authCtx struct {
+	context.Context
+	claimsOnce sync.Once
+	claims     *jwt.Claims
+}
+
+func NewAuthCtx(ctx context.Context) AuthCtx {
+	return &authCtx{Context: ctx}
+}
+
+func AuthFromCtx(ctx context.Context) (*jwt.Claims, bool) {
 	claims, ok := ctx.Value(claimsContextKey{}).(*jwt.Claims)
 	return claims, ok && claims != nil
+}
+
+func (c *authCtx) Claims() *jwt.Claims {
+	c.claimsOnce.Do(func() {
+		claims, ok := AuthFromCtx(c.Context)
+		if !ok || claims == nil {
+			panic("AuthCtx.Claims: no claims in context — is bearerAuth set on this operation?")
+		}
+		c.claims = claims
+	})
+	return c.claims
 }

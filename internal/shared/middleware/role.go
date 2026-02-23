@@ -12,7 +12,11 @@ func NewRoleMiddleware(api huma.API) func(huma.Context, func(huma.Context)) {
 			return
 		}
 
-		claims := ClaimsFromContext(ctx.Context())
+		claims, ok := AuthFromCtx(ctx.Context())
+		if !ok {
+			_ = huma.WriteErr(api, ctx, 401, "missing claims")
+			return
+		}
 
 		for _, r := range roles {
 			if claims.Role == r {

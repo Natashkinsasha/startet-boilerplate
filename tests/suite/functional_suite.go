@@ -89,7 +89,7 @@ func (s *FunctionalSuite) SetupSuite() {
 
 	application := internal.InitializeApp(appCtx)
 	s.BaseURL = application.BaseURL()
-	go application.Run(appCtx)
+	go func() { _ = application.Run(appCtx) }()
 
 	select {
 	case <-application.Ready():

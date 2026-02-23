@@ -50,12 +50,13 @@ starter-boilerplate/
 │   │   ├── server/
 │   │   │   └── setup.go     # SetupMux() → *http.ServeMux; SetupHTTPServer() → *http.Server
 │   │   ├── huma/
-│   │   │   ├── setup.go     # Setup(*http.ServeMux, AppConfig) → huma.API
+│   │   │   ├── setup.go     # Setup(*http.ServeMux, AppConfig) → huma.API; error sanitization
 │   │   │   └── spec.go      # GenerateSpecFile(huma.API) — writes docs/swagger.json
 │   │   ├── middleware/
-│   │   │   ├── setup.go     # Setup(*http.Server, huma.API, *jwt.Manager) → Init
-│   │   │   ├── auth.go      # NewAuthMiddleware — Bearer token validation
+│   │   │   ├── setup.go     # Setup(*http.Server, huma.API, *jwt.Manager, *UserLoaderCreator) → Init
+│   │   │   ├── auth.go      # NewAuthMiddleware, AuthCtx (claims with sync.Once)
 │   │   │   ├── role.go      # NewRoleMiddleware — role-based access control
+│   │   │   ├── user.go      # NewUserLoaderMiddleware, UserCtx (lazy user loading)
 │   │   │   ├── limiter.go   # NewLimiterMiddleware — per-IP rate limiting
 │   │   │   ├── logger.go    # newLoggerMiddleware — request logging
 │   │   │   └── requestid.go # NewRequestIDMiddleware — X-Request-ID header
@@ -63,8 +64,11 @@ starter-boilerplate/
 │   │   │   └── logger.go    # LoggerConfig; SetupLogger(LoggerConfig) → *zap.Logger
 │   │   ├── jwt/
 │   │   │   └── jwt.go       # JWTConfig; NewJWTManager(JWTConfig) → *pkgjwt.Manager
+│   │   ├── error/
+│   │   │   └── error.go     # AppError — domain error type with HTTP status codes
 │   │   ├── grpc/
-│   │   │   └── setup.go     # GRPCConfig; Setup(GRPCConfig, *zap.Logger) → *grpc.Server
+│   │   │   ├── setup.go     # GRPCConfig; Setup(GRPCConfig, *zap.Logger) → *grpc.Server
+│   │   │   └── error_interceptor.go # ErrorInterceptor — converts AppError → gRPC status
 │   │   └── migrate/
 │   │       └── runner.go    # Runner; wraps bun/migrate.Migrator
 │   │
@@ -80,7 +84,9 @@ starter-boilerplate/
 │       │   │   └── token.go         # TokenService interface + impl
 │       │   └── usecase/
 │       │       ├── login.go         # LoginUseCase — orchestrates login flow
-│       │       └── refresh.go       # RefreshUseCase — orchestrates token refresh
+│       │       ├── refresh.go       # RefreshUseCase — orchestrates token refresh
+│       │       ├── register.go      # RegisterUseCase — orchestrates registration + auto-login
+│       │       └── get_user.go      # GetUserUseCase — user profile access with role check
 │       ├── transport/
 │       │   ├── dto/
 │       │   │   └── user.go          # UserDTO, TokenPairDTO — shared across HTTP & gRPC
@@ -88,6 +94,7 @@ starter-boilerplate/
 │       │   │   ├── setup.go         # SetupHandlers() — registers all HTTP routes
 │       │   │   ├── login.go         # LoginHandler (POST /api/v1/auth/login)
 │       │   │   ├── refresh.go       # RefreshHandler (POST /api/v1/auth/refresh)
+│       │   │   ├── register.go      # RegisterHandler (POST /api/v1/auth/register)
 │       │   │   ├── get_user.go      # GetUserHandler (GET /api/v1/users/{id})
 │       │   │   └── types.go         # tokenOutput
 │       │   └── contract/
@@ -150,7 +157,7 @@ transport/handler  →  app/usecase  →  app/service  ←  infra/persistence
 | Entities / DTOs   | `domain/model`         | nothing external                                   |
 | Interfaces        | `domain/repository`    | `domain/model`                                     |
 | Services          | `app/service`          | `domain/repository`, `domain/model`, `pkg/jwt`     |
-| Use cases         | `app/usecase`          | `app/service`, `domain/model`                      |
+| Use cases         | `app/usecase`          | `app/service`, `domain/model`, `shared/middleware`  |
 | Transport DTOs    | `transport/dto`        | `domain/model`                                     |
 | HTTP handlers     | `transport/handler`    | `app/usecase`, `app/service`, `transport/dto`      |
 | gRPC contracts    | `transport/contract`   | `domain/repository`, `transport/dto`               |
@@ -449,16 +456,18 @@ func NewModule(_ handler.HandlersInit, _ usercontract.Init) Module {
     return Module{}
 }
 
-func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *gogrpc.Server, jwtManager *pkgjwt.Manager, _ sharedmw.Init) Module {
+func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager, _ sharedmw.Init, _ repository.UserRepository) Module {
     wire.Build(
-        persistence.NewUserRepository,
         service.NewUserService,
         service.NewTokenService,
         usecase.NewLoginUseCase,
         usecase.NewRefreshUseCase,
+        usecase.NewGetUserUseCase,
+        usecase.NewRegisterUseCase,
         handler.NewLoginHandler,
         handler.NewRefreshHandler,
         handler.NewGetUserHandler,
+        handler.NewRegisterHandler,
         handler.SetupHandlers,
         usercontract.SetupUserContract,
         NewModule,
@@ -469,7 +478,7 @@ func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *gogrpc.Server, jwtM
 
 `NewModule` is a Wire dependency sink — it ensures all handlers and contracts are created. `SetupHandlers` and `SetupUserContract` register routes during construction.
 
-`InitializeUserModule` accepts `_ sharedmw.Init` to guarantee middleware is installed before handlers are registered.
+`InitializeUserModule` accepts `_ sharedmw.Init` to guarantee middleware is installed before handlers are registered. `_ repository.UserRepository` is accepted as a parameter (provided externally by the application-level injector) rather than created internally.
 
 ### Code generation
 
@@ -604,6 +613,8 @@ type UserService interface {
     FindByEmail(ctx context.Context, email string) (*model.User, error)
     FindByID(ctx context.Context, id string) (*model.User, error)
     CheckPassword(passwordHash, password string) error
+    Create(ctx context.Context, user *model.User) error
+    HashPassword(password string) (string, error)
 }
 
 func NewUserService(userRepo repository.UserRepository) UserService
@@ -659,6 +670,41 @@ func NewRefreshUseCase(us service.UserService, ts service.TokenService) *Refresh
 2. `userService.FindByID(ctx, claims.UserID)` — verify user still exists
 3. `tokenService.IssueTokenPair(userID, role)` — issue new token pair
 
+```go
+// internal/user/app/usecase/register.go
+package usecase
+
+type RegisterUseCase struct {
+    userService  service.UserService
+    tokenService service.TokenService
+}
+
+func NewRegisterUseCase(us service.UserService, ts service.TokenService) *RegisterUseCase
+```
+
+`Execute(ctx, email, password)` flow:
+1. `userService.FindByEmail(ctx, email)` — check email uniqueness → `ErrEmailAlreadyExists`
+2. `userService.HashPassword(password)` — hash via bcrypt
+3. Create `model.User{ID: uuid.New(), Email, PasswordHash, Role: RoleUser}`
+4. `userService.Create(ctx, user)` — persist user
+5. `tokenService.IssueTokenPair(userID, role)` — auto-login, return tokens
+
+```go
+// internal/user/app/usecase/get_user.go
+package usecase
+
+type GetUserUseCase struct {
+    userService service.UserService
+}
+
+func NewGetUserUseCase(us service.UserService) *GetUserUseCase
+```
+
+`Execute(ctx middleware.AuthCtx, targetID)` flow:
+1. `ctx.Claims()` — extract authenticated user claims
+2. Role check: admins can access any user; non-admins can only access their own profile
+3. `userService.FindByID(ctx, targetID)` — fetch user → `ErrNotFound` if missing
+
 ### infra/persistence
 
 ```go
@@ -711,12 +757,13 @@ package handler
 
 type HandlersInit struct{}
 
-func SetupHandlers(api huma.API, loginH *LoginHandler, refreshH *RefreshHandler, getUserH *GetUserHandler) HandlersInit
+func SetupHandlers(api huma.API, loginH *LoginHandler, refreshH *RefreshHandler, getUserH *GetUserHandler, registerH *RegisterHandler) HandlersInit
 
-// login.go   — LoginHandler, NewLoginHandler(), Register(api), handle(ctx, *loginInput)
-// refresh.go — RefreshHandler, NewRefreshHandler(), Register(api), handle(ctx, *refreshInput)
+// login.go    — LoginHandler, NewLoginHandler(), Register(api), handle(ctx, *loginInput)
+// refresh.go  — RefreshHandler, NewRefreshHandler(), Register(api), handle(ctx, *refreshInput)
+// register.go — RegisterHandler, NewRegisterHandler(), Register(api), handle(ctx, *registerInput)
 // get_user.go — GetUserHandler, NewGetUserHandler(), Register(api), handle(ctx, *getUserInput)
-// types.go   — tokenOutput (uses dto.TokenPairDTO as Body)
+// types.go    — tokenOutput (uses dto.TokenPairDTO as Body)
 ```
 
 ### transport/contract
@@ -741,6 +788,11 @@ func SetupUserContract(grpcSrv *grpc.Server, ur repository.UserRepository) Init
 ### HTTP endpoints
 
 ```
+POST /api/v1/auth/register
+  Body:     { "email": string (format: email), "password": string (minLength: 6) }
+  Response: { "access_token": string, "refresh_token": string }
+  Notes:    Creates a new user with role "user" and returns tokens (auto-login)
+
 POST /api/v1/auth/login
   Body:     { "email": string (format: email), "password": string (minLength: 6) }
   Response: { "access_token": string, "refresh_token": string }
@@ -767,10 +819,94 @@ Middleware is installed in `internal/shared/middleware/setup.go` in two layers:
 3. `Limiter` — per-IP rate limiting (100 req/min)
 4. `Auth` — validates Bearer token on endpoints with `bearerAuth` security
 5. `Role` — checks `requiredRoles` metadata on operations
+6. `UserLoader` — injects a lazy user loader into context for authenticated requests
 
 **HTTP-level** (wraps the entire `http.Handler`):
 - `WithCORS` — permissive CORS headers
 - `WithRecover` — panic recovery, returns 500 JSON
+
+### Typed context: AuthCtx / UserCtx
+
+Use cases that require authentication accept typed context interfaces instead of raw `context.Context`:
+
+```go
+// auth.go
+type AuthCtx interface {
+    context.Context
+    Claims() *jwt.Claims   // lazy, memoized via sync.Once; panics if no claims
+}
+
+func NewAuthCtx(ctx context.Context) AuthCtx
+
+// user.go
+type UserCtx interface {
+    AuthCtx
+    User() (*service.AuthUser, error)  // lazy, memoized via sync.Once
+}
+
+func NewUserCtx(ctx context.Context) UserCtx
+```
+
+This provides **compile-time safety**: a use case declares exactly what auth data it needs. `Claims()` and `User()` are lazily evaluated with `sync.Once` — no extraction happens until the method is called.
+
+Handlers create the appropriate context:
+```go
+// handler needing only claims
+h.uc.Execute(middleware.NewAuthCtx(ctx), ...)
+
+// handler needing full user
+h.uc.Execute(middleware.NewUserCtx(ctx), ...)
+```
+
+---
+
+## Error handling
+
+### AppError
+
+Domain errors use `AppError` from `internal/shared/error/error.go`:
+
+```go
+type AppError struct {
+    Status  int      // HTTP status code
+    Message string   // user-facing message
+}
+
+func (e *AppError) GetStatus() int  // implements huma.StatusError
+func (e *AppError) Error() string
+
+// Sentinel errors
+var (
+    ErrAccessDenied       = New(http.StatusForbidden, "access denied")
+    ErrNotFound           = New(http.StatusNotFound, "not found")
+    ErrInvalidCredentials = New(http.StatusUnauthorized, "invalid credentials")
+    ErrInvalidToken       = New(http.StatusUnauthorized, "invalid token")
+    ErrEmailAlreadyExists = New(http.StatusConflict, "email already exists")
+)
+```
+
+`AppError` implements huma's `StatusError` interface (`GetStatus() int`), so huma automatically uses the correct HTTP status code when a handler returns an `AppError`.
+
+### HTTP error sanitization
+
+`huma.NewErrorWithContext` is overridden in `internal/shared/huma/setup.go` to sanitize 5xx errors — internal details are logged and the response is replaced with a generic `"internal server error"` message.
+
+### gRPC error interceptor
+
+`internal/shared/grpc/error_interceptor.go` provides a `grpc.UnaryServerInterceptor` that converts `AppError` to gRPC status codes via `httpToGRPC()` mapping:
+
+| HTTP status             | gRPC code              |
+|-------------------------|------------------------|
+| 400 Bad Request         | `InvalidArgument`      |
+| 401 Unauthorized        | `Unauthenticated`      |
+| 403 Forbidden           | `PermissionDenied`     |
+| 404 Not Found           | `NotFound`             |
+| 409 Conflict            | `AlreadyExists`        |
+| 422 Unprocessable       | `InvalidArgument`      |
+| 429 Too Many Requests   | `ResourceExhausted`    |
+| other                   | `Internal`             |
+
+Unknown errors are logged and returned as `codes.Internal` with a sanitized message.
 
 ---
 

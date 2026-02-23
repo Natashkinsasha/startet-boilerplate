@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"starter-boilerplate/internal/shared/middleware"
 	"starter-boilerplate/internal/user/app/usecase"
 	"starter-boilerplate/internal/user/transport/dto"
 
@@ -42,7 +43,7 @@ func (h *GetUserHandler) Register(api huma.API) {
 }
 
 func (h *GetUserHandler) handle(ctx context.Context, input *getUserInput) (*getUserOutput, error) {
-	u, err := h.uc.Execute(ctx, input.ID)
+	u, err := h.uc.Execute(middleware.NewUserCtx(ctx), input.ID)
 	if err != nil {
 		return nil, err
 	}
