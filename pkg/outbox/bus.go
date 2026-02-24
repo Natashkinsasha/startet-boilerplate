@@ -23,10 +23,14 @@ type Bus interface {
 	Publish(ctx context.Context, event Event) error
 }
 
+type entryRepository interface {
+	Insert(ctx context.Context, entry *Entry) error
+}
+
 // OutboxBus implements Bus by inserting events into the outbox table.
 // It relies on the transaction being present in context (via pkgdb.WithTx).
 type OutboxBus struct {
-	outboxRepo *Repository
+	outboxRepo entryRepository
 }
 
 // NewOutboxBus creates an OutboxBus.
