@@ -7,6 +7,7 @@ import (
 
 	"starter-boilerplate/internal/user/domain/model"
 	"starter-boilerplate/internal/user/domain/repository"
+	pkgdb "starter-boilerplate/pkg/db"
 
 	"github.com/uptrace/bun"
 )
@@ -32,7 +33,7 @@ func NewUserRepository(db *bun.DB) repository.UserRepository {
 
 func (r *userRepository) FindByID(ctx context.Context, id string) (*model.User, error) {
 	var m userModel
-	err := r.db.NewSelect().Model(&m).Where("id = ?", id).Scan(ctx)
+	err := pkgdb.Conn(ctx, r.db).NewSelect().Model(&m).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -44,7 +45,7 @@ func (r *userRepository) FindByID(ctx context.Context, id string) (*model.User, 
 
 func (r *userRepository) FindByEmail(ctx context.Context, email string) (*model.User, error) {
 	var m userModel
-	err := r.db.NewSelect().Model(&m).Where("email = ?", email).Scan(ctx)
+	err := pkgdb.Conn(ctx, r.db).NewSelect().Model(&m).Where("email = ?", email).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -56,13 +57,13 @@ func (r *userRepository) FindByEmail(ctx context.Context, email string) (*model.
 
 func (r *userRepository) Create(ctx context.Context, u *model.User) error {
 	m := fromEntity(u)
-	_, err := r.db.NewInsert().Model(m).Exec(ctx)
+	_, err := pkgdb.Conn(ctx, r.db).NewInsert().Model(m).Exec(ctx)
 	return err
 }
 
 func (r *userRepository) Update(ctx context.Context, u *model.User) error {
 	m := fromEntity(u)
-	_, err := r.db.NewUpdate().Model(m).WherePK().Exec(ctx)
+	_, err := pkgdb.Conn(ctx, r.db).NewUpdate().Model(m).WherePK().Exec(ctx)
 	return err
 }
 

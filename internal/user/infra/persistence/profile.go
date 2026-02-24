@@ -9,6 +9,7 @@ import (
 
 	"starter-boilerplate/internal/user/domain/model"
 	"starter-boilerplate/internal/user/domain/repository"
+	pkgdb "starter-boilerplate/pkg/db"
 
 	"github.com/uptrace/bun"
 )
@@ -33,7 +34,7 @@ func NewProfileRepository(db *bun.DB) repository.ProfileRepository {
 
 func (r *profileRepository) FindByUserID(ctx context.Context, userID string) (*model.Profile, error) {
 	var m profileModel
-	err := r.db.NewSelect().Model(&m).Where("user_id = ?", userID).Scan(ctx)
+	err := pkgdb.Conn(ctx, r.db).NewSelect().Model(&m).Where("user_id = ?", userID).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -46,7 +47,7 @@ func (r *profileRepository) FindByUserID(ctx context.Context, userID string) (*m
 func (r *profileRepository) Upsert(ctx context.Context, profile *model.Profile) error {
 	m := fromProfileEntity(profile)
 
-	_, err := r.db.NewInsert().
+	_, err := pkgdb.Conn(ctx, r.db).NewInsert().
 		Model(m).
 		On("CONFLICT (user_id) DO NOTHING").
 		Exec(ctx)
@@ -54,7 +55,7 @@ func (r *profileRepository) Upsert(ctx context.Context, profile *model.Profile) 
 }
 
 func (r *profileRepository) Update(ctx context.Context, userID string, upd *model.ProfileUpdate) error {
-	q := r.db.NewUpdate().
+	q := pkgdb.Conn(ctx, r.db).NewUpdate().
 		TableExpr("user_profiles").
 		Where("user_id = ?", userID).
 		Set("updated_at = ?", time.Now().Unix())

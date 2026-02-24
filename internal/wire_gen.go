@@ -28,6 +28,7 @@ import (
 	"starter-boilerplate/pkg/db"
 	"starter-boilerplate/pkg/event"
 	"starter-boilerplate/pkg/grpc"
+	"starter-boilerplate/pkg/outbox"
 	"starter-boilerplate/pkg/redis"
 )
 
@@ -51,19 +52,32 @@ func InitializeApp(ctx context.Context) *app.App {
 	userLoaderCreator := service.NewUserLoaderCreator(userRepository)
 	init := middleware.Setup(httpServer, api, manager, userLoaderCreator)
 	profileRepository := persistence.NewProfileRepository(bunDB)
+	repository := outbox.NewRepository(bunDB)
+	outboxBus := outbox.NewOutboxBus(repository)
 	amqpConfig := configConfig.AMQP
 	connection := amqp.Setup(amqpConfig, slogLogger)
 	broker := consumer.Setup(connection, amqpConfig)
-	bus := event.NewEventBus(connection, broker)
-	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init, userRepository, profileRepository, bus, broker)
+	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init, userRepository, profileRepository, outboxBus, broker)
 	redisConfig := configConfig.Redis
 	client := redis.Setup(ctx, redisConfig, slogLogger)
-	appApp := newApp(httpServer, configConfig, module, slogLogger, client, grpcServer, api, broker)
+	bus := event.NewEventBus(connection, broker)
+	outboxPublisher := provideOutboxPublisher(broker, bus)
+	relayConfig := provideRelayConfig(configConfig)
+	relay := outbox.NewRelay(bunDB, repository, outboxPublisher, relayConfig)
+	appApp := newApp(httpServer, configConfig, module, slogLogger, client, grpcServer, api, broker, relay)
 	return appApp
 }
 
 // initialize.go:
 
-func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *slog.Logger, _ *redis2.Client, grpcSrv *grpc2.Server, api huma2.API, broker *amqp.Broker) *app.App {
-	return app.New(httpSrv, cfg, grpcSrv, api, broker)
+func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *slog.Logger, _ *redis2.Client, grpcSrv *grpc2.Server, api huma2.API, broker *amqp.Broker, relay *outbox.Relay) *app.App {
+	return app.New(httpSrv, cfg, grpcSrv, api, broker, relay)
+}
+
+func provideOutboxPublisher(broker *amqp.Broker, _ event.Bus) *event.OutboxPublisher {
+	return event.NewOutboxPublisher(broker, event.ExchangeEvents)
+}
+
+func provideRelayConfig(cfg *config.Config) outbox.RelayConfig {
+	return cfg.Outbox
 }

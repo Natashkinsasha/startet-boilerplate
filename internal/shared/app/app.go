@@ -11,6 +11,7 @@ import (
 
 	"starter-boilerplate/internal/shared/config"
 	pkgamqp "starter-boilerplate/pkg/amqp"
+	"starter-boilerplate/pkg/outbox"
 
 	gohuma "github.com/danielgtaylor/huma/v2"
 	"golang.org/x/sync/errgroup"
@@ -23,17 +24,19 @@ type App struct {
 	Config     *config.Config
 	Api        gohuma.API
 	broker     *pkgamqp.Broker
+	relay      *outbox.Relay
 	ready      chan struct{}
 	startErr   chan error
 }
 
-func New(httpSrv *http.Server, cfg *config.Config, grpcSrv *gogrpc.Server, api gohuma.API, broker *pkgamqp.Broker) *App {
+func New(httpSrv *http.Server, cfg *config.Config, grpcSrv *gogrpc.Server, api gohuma.API, broker *pkgamqp.Broker, relay *outbox.Relay) *App {
 	return &App{
 		HTTPServer: httpSrv,
 		GRPCServer: grpcSrv,
 		Config:     cfg,
 		Api:        api,
 		broker:     broker,
+		relay:      relay,
 		ready:      make(chan struct{}),
 		startErr:   make(chan error, 1),
 	}
@@ -70,11 +73,6 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
-	slog.Info("application starting",
-		slog.Int("http_port", a.Config.App.Port),
-		slog.Int("grpc_port", a.Config.GRPC.Port),
-	)
-
 	close(a.ready)
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -97,6 +95,10 @@ func (a *App) Run(ctx context.Context) error {
 
 	g.Go(func() error {
 		return a.broker.Run(gCtx)
+	})
+
+	g.Go(func() error {
+		return a.relay.Run(gCtx)
 	})
 
 	g.Go(func() error {

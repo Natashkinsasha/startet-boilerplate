@@ -22,6 +22,7 @@ import (
 	"starter-boilerplate/pkg/db"
 	"starter-boilerplate/pkg/event"
 	pkggrpc "starter-boilerplate/pkg/grpc"
+	"starter-boilerplate/pkg/outbox"
 	"starter-boilerplate/pkg/redis"
 
 	gohuma "github.com/danielgtaylor/huma/v2"
@@ -30,8 +31,16 @@ import (
 	gogrpc "google.golang.org/grpc"
 )
 
-func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *slog.Logger, _ *goredis.Client, grpcSrv *gogrpc.Server, api gohuma.API, broker *pkgamqp.Broker) *app.App {
-	return app.New(httpSrv, cfg, grpcSrv, api, broker)
+func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *slog.Logger, _ *goredis.Client, grpcSrv *gogrpc.Server, api gohuma.API, broker *pkgamqp.Broker, relay *outbox.Relay) *app.App {
+	return app.New(httpSrv, cfg, grpcSrv, api, broker, relay)
+}
+
+func provideOutboxPublisher(broker *pkgamqp.Broker, _ event.Bus) *event.OutboxPublisher {
+	return event.NewOutboxPublisher(broker, event.ExchangeEvents)
+}
+
+func provideRelayConfig(cfg *config.Config) outbox.RelayConfig {
+	return cfg.Outbox
 }
 
 func InitializeApp(ctx context.Context) *app.App {
@@ -52,6 +61,14 @@ func InitializeApp(ctx context.Context) *app.App {
 		persistence.NewProfileRepository,
 		service.NewUserLoaderCreator,
 		middleware.Setup,
+
+		outbox.NewRepository,
+		outbox.NewOutboxBus,
+		wire.Bind(new(outbox.Bus), new(*outbox.OutboxBus)),
+		provideOutboxPublisher,
+		wire.Bind(new(outbox.Publisher), new(*event.OutboxPublisher)),
+		provideRelayConfig,
+		outbox.NewRelay,
 
 		sharedconsumer.Setup,
 		user.InitializeUserModule,

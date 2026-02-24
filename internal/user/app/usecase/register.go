@@ -4,25 +4,29 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 
 	"starter-boilerplate/internal/shared/errs"
 	"starter-boilerplate/internal/user/app/service"
 	domainevent "starter-boilerplate/internal/user/domain/event"
 	"starter-boilerplate/internal/user/domain/model"
-	"starter-boilerplate/pkg/event"
+	pkgdb "starter-boilerplate/pkg/db"
+	"starter-boilerplate/pkg/outbox"
 )
 
 type RegisterUseCase struct {
 	userService  service.UserService
 	tokenService service.TokenService
-	eventBus     event.Bus
+	bus          outbox.Bus
+	db           *bun.DB
 }
 
-func NewRegisterUseCase(us service.UserService, ts service.TokenService, eb event.Bus) *RegisterUseCase {
+func NewRegisterUseCase(us service.UserService, ts service.TokenService, bus outbox.Bus, db *bun.DB) *RegisterUseCase {
 	return &RegisterUseCase{
 		userService:  us,
 		tokenService: ts,
-		eventBus:     eb,
+		bus:          bus,
+		db:           db,
 	}
 }
 
@@ -47,14 +51,16 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, email, password string) 
 		Role:         model.RoleUser,
 	}
 
-	if err := uc.userService.Create(ctx, user); err != nil {
-		return nil, err
-	}
-
-	if err := uc.eventBus.Publish(ctx, domainevent.UserCreatedEvent{
-		UserID: user.ID,
-		Email:  user.Email,
-	}); err != nil {
+	err = pkgdb.RunInTx(ctx, uc.db, func(ctx context.Context) error {
+		if err := uc.userService.Create(ctx, user); err != nil {
+			return err
+		}
+		return uc.bus.Publish(ctx, domainevent.UserCreatedEvent{
+			UserID: user.ID,
+			Email:  user.Email,
+		})
+	})
+	if err != nil {
 		return nil, err
 	}
 

@@ -10,8 +10,8 @@ import (
 	usercontract "starter-boilerplate/internal/user/transport/contract"
 	"starter-boilerplate/internal/user/transport/handler"
 	pkgamqp "starter-boilerplate/pkg/amqp"
-	"starter-boilerplate/pkg/event"
 	pkgjwt "starter-boilerplate/pkg/jwt"
+	"starter-boilerplate/pkg/outbox"
 
 	"starter-boilerplate/internal/user/app/service"
 
@@ -27,7 +27,7 @@ func NewModule(_ handler.HandlersInit, _ usercontract.Init, _ consumer.Init) Mod
 	return Module{}
 }
 
-func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager, _ sharedmw.Init, _ repository.UserRepository, _ repository.ProfileRepository, _ event.Bus, _ *pkgamqp.Broker) Module {
+func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager, _ sharedmw.Init, _ repository.UserRepository, _ repository.ProfileRepository, _ outbox.Bus, _ *pkgamqp.Broker) Module {
 	wire.Build(
 		service.NewUserService,
 		service.NewTokenService,

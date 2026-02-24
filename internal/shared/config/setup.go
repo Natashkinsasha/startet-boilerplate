@@ -8,6 +8,7 @@ import (
 	pkgamqp "starter-boilerplate/pkg/amqp"
 	pkgdb "starter-boilerplate/pkg/db"
 	pkggrpc "starter-boilerplate/pkg/grpc"
+	"starter-boilerplate/pkg/outbox"
 	pkgredis "starter-boilerplate/pkg/redis"
 
 	sharedjwt "starter-boilerplate/internal/shared/jwt"
@@ -35,6 +36,7 @@ type Config struct {
 	JWT    sharedjwt.JWTConfig       `yaml:"jwt"`
 	GRPC   pkggrpc.GRPCConfig        `yaml:"grpc"`
 	AMQP   pkgamqp.AMQPConfig        `yaml:"amqp"`
+	Outbox outbox.RelayConfig        `yaml:"outbox"`
 }
 
 func SetupConfig() *Config {

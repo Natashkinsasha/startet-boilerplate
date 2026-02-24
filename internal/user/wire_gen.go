@@ -18,13 +18,13 @@ import (
 	"starter-boilerplate/internal/user/transport/contract"
 	"starter-boilerplate/internal/user/transport/handler"
 	"starter-boilerplate/pkg/amqp"
-	"starter-boilerplate/pkg/event"
 	"starter-boilerplate/pkg/jwt"
+	"starter-boilerplate/pkg/outbox"
 )
 
 // Injectors from initialize.go:
 
-func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manager *jwt.Manager, init middleware.Init, userRepository repository.UserRepository, profileRepository repository.ProfileRepository, bus event.Bus, broker *amqp.Broker) Module {
+func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manager *jwt.Manager, init middleware.Init, userRepository repository.UserRepository, profileRepository repository.ProfileRepository, bus outbox.Bus, broker *amqp.Broker) Module {
 	userService := service.NewUserService(userRepository)
 	tokenService := service.NewTokenService(manager)
 	loginUseCase := usecase.NewLoginUseCase(userService, tokenService)
@@ -33,9 +33,9 @@ func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manage
 	refreshHandler := handler.NewRefreshHandler(refreshUseCase)
 	getUserUseCase := usecase.NewGetUserUseCase(userService)
 	getUserHandler := handler.NewGetUserHandler(getUserUseCase)
-	registerUseCase := usecase.NewRegisterUseCase(userService, tokenService, bus)
+	registerUseCase := usecase.NewRegisterUseCase(userService, tokenService, bus, db)
 	registerHandler := handler.NewRegisterHandler(registerUseCase)
-	changePasswordUseCase := usecase.NewChangePasswordUseCase(userService, bus)
+	changePasswordUseCase := usecase.NewChangePasswordUseCase(userService, bus, db)
 	changePasswordHandler := handler.NewChangePasswordHandler(changePasswordUseCase)
 	handlersInit := handler.SetupHandlers(api, loginHandler, refreshHandler, getUserHandler, registerHandler, changePasswordHandler)
 	contractInit := contract.SetupUserContract(grpcSrv, userRepository)
