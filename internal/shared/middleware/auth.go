@@ -10,6 +10,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
+var _ AuthCtx = (*authCtx)(nil)
+
 type claimsContextKey struct{}
 
 func NewAuthMiddleware(api huma.API, jwtManager *jwt.Manager) func(huma.Context, func(huma.Context)) {

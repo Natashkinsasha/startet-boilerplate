@@ -8,6 +8,9 @@ dev:
 build:
 	go build -o bin/api ./cmd/api/...
 
+debug:
+	APP_ENV=local dlv debug ./cmd/api/... --headless --listen=:2345 --api-version=2 --accept-multiclient --log
+
 wire:
 	wire gen ./...
 
@@ -59,6 +62,7 @@ install-tools:
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install github.com/air-verse/air@latest
+	go install github.com/go-delve/delve/cmd/dlv@latest
 
 deps:
 	go mod tidy

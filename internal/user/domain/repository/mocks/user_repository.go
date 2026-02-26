@@ -37,3 +37,8 @@ func (m *UserRepository) Update(ctx context.Context, user *model.User) error {
 	args := m.Called(ctx, user)
 	return args.Error(0)
 }
+
+func (m *UserRepository) UpdatePassword(ctx context.Context, id, hash string) error {
+	args := m.Called(ctx, id, hash)
+	return args.Error(0)
+}

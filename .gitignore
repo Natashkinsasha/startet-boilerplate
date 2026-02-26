@@ -16,3 +16,4 @@ cmd/api/wire_gen.go
 
 # OS
 .DS_Store
+/api

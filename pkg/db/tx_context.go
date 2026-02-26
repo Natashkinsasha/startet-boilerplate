@@ -13,19 +13,16 @@ func WithTx(ctx context.Context, tx bun.Tx) context.Context {
 	return context.WithValue(ctx, txKey{}, tx)
 }
 
-// Conn returns the bun.Tx stored in ctx, or falls back to the given *bun.DB.
+// TxFromCtx returns the bun.Tx stored in ctx, if any.
+func TxFromCtx(ctx context.Context) (bun.Tx, bool) {
+	tx, ok := ctx.Value(txKey{}).(bun.Tx)
+	return tx, ok
+}
+
+// Conn returns the active connection from ctx: transaction first, then the fallback *bun.DB.
 func Conn(ctx context.Context, fallback *bun.DB) bun.IDB {
-	if tx, ok := ctx.Value(txKey{}).(bun.Tx); ok {
+	if tx, ok := TxFromCtx(ctx); ok {
 		return tx
 	}
 	return fallback
-}
-
-// RunInTx executes fn inside a database transaction.
-// The transaction is stored in the context via WithTx so repositories
-// can pick it up automatically through Conn.
-func RunInTx(ctx context.Context, db *bun.DB, fn func(ctx context.Context) error) error {
-	return db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		return fn(WithTx(ctx, tx))
-	})
 }

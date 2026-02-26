@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 
 	"starter-boilerplate/internal/shared/errs"
 	"starter-boilerplate/internal/user/app/service"
@@ -18,15 +17,15 @@ type RegisterUseCase struct {
 	userService  service.UserService
 	tokenService service.TokenService
 	bus          outbox.Bus
-	db           *bun.DB
+	uow          pkgdb.UoW
 }
 
-func NewRegisterUseCase(us service.UserService, ts service.TokenService, bus outbox.Bus, db *bun.DB) *RegisterUseCase {
+func NewRegisterUseCase(us service.UserService, ts service.TokenService, bus outbox.Bus, uow pkgdb.UoW) *RegisterUseCase {
 	return &RegisterUseCase{
 		userService:  us,
 		tokenService: ts,
 		bus:          bus,
-		db:           db,
+		uow:          uow,
 	}
 }
 
@@ -51,7 +50,7 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, email, password string) 
 		Role:         model.RoleUser,
 	}
 
-	err = pkgdb.RunInTx(ctx, uc.db, func(ctx context.Context) error {
+	err = uc.uow.Do(ctx, func(ctx context.Context) error {
 		if err := uc.userService.Create(ctx, user); err != nil {
 			return err
 		}

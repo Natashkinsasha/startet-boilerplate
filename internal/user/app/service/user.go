@@ -55,13 +55,5 @@ func (s *userService) Create(ctx context.Context, user *model.User) error {
 }
 
 func (s *userService) UpdatePassword(ctx context.Context, id, hash string) error {
-	user, err := s.userRepo.FindByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if user == nil {
-		return errs.ErrNotFound
-	}
-	user.PasswordHash = hash
-	return s.userRepo.Update(ctx, user)
+	return s.userRepo.UpdatePassword(ctx, id, hash)
 }

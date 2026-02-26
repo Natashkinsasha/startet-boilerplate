@@ -10,39 +10,45 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/uptrace/bun"
 	"google.golang.org/grpc"
+	"starter-boilerplate/internal/shared/centrifugenode"
 	"starter-boilerplate/internal/shared/middleware"
 	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/internal/user/app/usecase"
-	"starter-boilerplate/internal/user/domain/repository"
+	"starter-boilerplate/internal/user/infra/persistence"
 	"starter-boilerplate/internal/user/transport/consumer"
 	"starter-boilerplate/internal/user/transport/contract"
 	"starter-boilerplate/internal/user/transport/handler"
 	"starter-boilerplate/pkg/amqp"
+	"starter-boilerplate/pkg/db"
 	"starter-boilerplate/pkg/jwt"
 	"starter-boilerplate/pkg/outbox"
 )
 
 // Injectors from initialize.go:
 
-func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manager *jwt.Manager, init middleware.Init, userRepository repository.UserRepository, profileRepository repository.ProfileRepository, bus outbox.Bus, broker *amqp.Broker) Module {
+func InitializeUserModule(api huma.API, grpcSrv *grpc.Server, manager *jwt.Manager, bunDB *bun.DB, bus outbox.Bus, broker *amqp.Broker, uoW db.UoW, publisher *centrifugenode.Publisher, init middleware.Init) Module {
+	userRepository := persistence.NewUserRepository(bunDB)
 	userService := service.NewUserService(userRepository)
 	tokenService := service.NewTokenService(manager)
-	loginUseCase := usecase.NewLoginUseCase(userService, tokenService)
+	loginUseCase := usecase.NewLoginUseCase(userService, tokenService, bus)
 	loginHandler := handler.NewLoginHandler(loginUseCase)
 	refreshUseCase := usecase.NewRefreshUseCase(userService, tokenService)
 	refreshHandler := handler.NewRefreshHandler(refreshUseCase)
 	getUserUseCase := usecase.NewGetUserUseCase(userService)
 	getUserHandler := handler.NewGetUserHandler(getUserUseCase)
-	registerUseCase := usecase.NewRegisterUseCase(userService, tokenService, bus, db)
+	registerUseCase := usecase.NewRegisterUseCase(userService, tokenService, bus, uoW)
 	registerHandler := handler.NewRegisterHandler(registerUseCase)
-	changePasswordUseCase := usecase.NewChangePasswordUseCase(userService, bus, db)
+	changePasswordUseCase := usecase.NewChangePasswordUseCase(userService, bus, uoW)
 	changePasswordHandler := handler.NewChangePasswordHandler(changePasswordUseCase)
 	handlersInit := handler.SetupHandlers(api, loginHandler, refreshHandler, getUserHandler, registerHandler, changePasswordHandler)
 	contractInit := contract.SetupUserContract(grpcSrv, userRepository)
+	profileRepository := persistence.NewProfileRepository(bunDB)
 	profileService := service.NewProfileService(profileRepository)
 	profileUpdaterConsumer := consumer.NewProfileUpdaterConsumer(profileService)
 	consumerInit := consumer.SetupConsumers(broker, profileUpdaterConsumer)
-	module := NewModule(handlersInit, contractInit, consumerInit)
+	bridgeConsumer := consumer.NewBridgeConsumer(publisher)
+	bridgeInit := consumer.SetupBridgeConsumer(broker, bridgeConsumer)
+	module := NewModule(handlersInit, contractInit, consumerInit, bridgeInit)
 	return module
 }
 
@@ -50,6 +56,6 @@ func InitializeUserModule(db *bun.DB, api huma.API, grpcSrv *grpc.Server, manage
 
 type Module struct{}
 
-func NewModule(_ handler.HandlersInit, _ contract.Init, _ consumer.Init) Module {
+func NewModule(_ handler.HandlersInit, _ contract.Init, _ consumer.Init, _ consumer.BridgeInit) Module {
 	return Module{}
 }

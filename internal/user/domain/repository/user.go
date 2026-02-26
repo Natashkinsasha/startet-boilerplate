@@ -11,4 +11,5 @@ type UserRepository interface {
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	Create(ctx context.Context, user *model.User) error
 	Update(ctx context.Context, user *model.User) error
+	UpdatePassword(ctx context.Context, id, hash string) error
 }

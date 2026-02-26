@@ -19,6 +19,12 @@ func NewOutboxPublisher(broker *pkgamqp.Broker, exchange string) *OutboxPublishe
 	return &OutboxPublisher{broker: broker, exchange: exchange}
 }
 
+// NewDefaultOutboxPublisher is a Wire-friendly constructor that hardcodes ExchangeEvents.
+// The Bus parameter is unused but ensures Wire initializes the bus first.
+func NewDefaultOutboxPublisher(_ Bus, broker *pkgamqp.Broker) *OutboxPublisher {
+	return NewOutboxPublisher(broker, ExchangeEvents)
+}
+
 func (p *OutboxPublisher) Publish(ctx context.Context, entry outbox.Entry) error {
 	return p.broker.Publish(ctx, p.exchange, entry.EventName, toAMQPTable(entry.Headers), entry.Payload, pkgamqp.AtLeastOnce)
 }

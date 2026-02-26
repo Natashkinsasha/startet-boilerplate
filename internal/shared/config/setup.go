@@ -6,6 +6,7 @@ import (
 	"time"
 
 	pkgamqp "starter-boilerplate/pkg/amqp"
+	pkgcentrifuge "starter-boilerplate/pkg/centrifuge"
 	pkgdb "starter-boilerplate/pkg/db"
 	pkggrpc "starter-boilerplate/pkg/grpc"
 	"starter-boilerplate/pkg/outbox"
@@ -29,14 +30,15 @@ type AppConfig struct {
 }
 
 type Config struct {
-	App    AppConfig                 `yaml:"app"`
-	Logger sharedlogger.LoggerConfig `yaml:"logger"`
-	DB     pkgdb.DBConfig            `yaml:"db"`
-	Redis  pkgredis.RedisConfig      `yaml:"redis"`
-	JWT    sharedjwt.JWTConfig       `yaml:"jwt"`
-	GRPC   pkggrpc.GRPCConfig        `yaml:"grpc"`
-	AMQP   pkgamqp.AMQPConfig        `yaml:"amqp"`
-	Outbox outbox.RelayConfig        `yaml:"outbox"`
+	App        AppConfig                 `yaml:"app"`
+	Logger     sharedlogger.LoggerConfig `yaml:"logger"`
+	DB         pkgdb.DBConfig            `yaml:"db"`
+	Redis      pkgredis.RedisConfig      `yaml:"redis"`
+	JWT        sharedjwt.JWTConfig       `yaml:"jwt"`
+	GRPC       pkggrpc.GRPCConfig        `yaml:"grpc"`
+	AMQP       pkgamqp.AMQPConfig        `yaml:"amqp"`
+	Outbox     outbox.RelayConfig        `yaml:"outbox"`
+	Centrifuge pkgcentrifuge.Config      `yaml:"centrifuge"`
 }
 
 func SetupConfig() *Config {

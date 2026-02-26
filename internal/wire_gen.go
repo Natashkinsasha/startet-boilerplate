@@ -8,12 +8,14 @@ package internal
 
 import (
 	"context"
+	centrifuge2 "github.com/centrifugal/centrifuge"
 	huma2 "github.com/danielgtaylor/huma/v2"
 	redis2 "github.com/redis/go-redis/v9"
 	grpc2 "google.golang.org/grpc"
 	"log/slog"
 	"net/http"
 	"starter-boilerplate/internal/shared/app"
+	"starter-boilerplate/internal/shared/centrifugenode"
 	"starter-boilerplate/internal/shared/config"
 	"starter-boilerplate/internal/shared/consumer"
 	"starter-boilerplate/internal/shared/huma"
@@ -22,9 +24,8 @@ import (
 	"starter-boilerplate/internal/shared/middleware"
 	"starter-boilerplate/internal/shared/server"
 	"starter-boilerplate/internal/user"
-	"starter-boilerplate/internal/user/app/service"
-	"starter-boilerplate/internal/user/infra/persistence"
 	"starter-boilerplate/pkg/amqp"
+	"starter-boilerplate/pkg/centrifuge"
 	"starter-boilerplate/pkg/db"
 	"starter-boilerplate/pkg/event"
 	"starter-boilerplate/pkg/grpc"
@@ -39,45 +40,39 @@ func InitializeApp(ctx context.Context) *app.App {
 	configConfig := config.SetupConfig()
 	appConfig := configConfig.App
 	httpServer := server.SetupHTTPServer(serveMux, appConfig)
-	dbConfig := configConfig.DB
-	loggerConfig := configConfig.Logger
-	slogLogger := logger.SetupLogger(loggerConfig)
-	bunDB := db.Setup(ctx, dbConfig, slogLogger)
 	api := huma.Setup(serveMux, appConfig)
 	grpcConfig := configConfig.GRPC
+	loggerConfig := configConfig.Logger
+	slogLogger := logger.SetupLogger(loggerConfig)
 	grpcServer := grpc.Setup(grpcConfig, slogLogger)
 	jwtConfig := configConfig.JWT
 	manager := jwt.NewJWTManager(jwtConfig)
-	userRepository := persistence.NewUserRepository(bunDB)
-	userLoaderCreator := service.NewUserLoaderCreator(userRepository)
-	init := middleware.Setup(httpServer, api, manager, userLoaderCreator)
-	profileRepository := persistence.NewProfileRepository(bunDB)
+	dbConfig := configConfig.DB
+	bunDB := db.Setup(ctx, dbConfig, slogLogger)
 	repository := outbox.NewRepository(bunDB)
 	outboxBus := outbox.NewOutboxBus(repository)
 	amqpConfig := configConfig.AMQP
 	connection := amqp.Setup(amqpConfig, slogLogger)
 	broker := consumer.Setup(connection, amqpConfig)
-	module := user.InitializeUserModule(bunDB, api, grpcServer, manager, init, userRepository, profileRepository, outboxBus, broker)
+	unitOfWork := db.NewUnitOfWork(bunDB)
+	centrifugeConfig := configConfig.Centrifuge
 	redisConfig := configConfig.Redis
 	client := redis.Setup(ctx, redisConfig, slogLogger)
+	node := centrifuge.Setup(ctx, centrifugeConfig, client, slogLogger)
+	publisher := centrifugenode.NewPublisher(node, centrifugeConfig)
+	init := middleware.Setup(httpServer, api, manager)
+	module := user.InitializeUserModule(api, grpcServer, manager, bunDB, outboxBus, broker, unitOfWork, publisher, init)
 	bus := event.NewEventBus(connection, broker)
-	outboxPublisher := provideOutboxPublisher(broker, bus)
-	relayConfig := provideRelayConfig(configConfig)
+	outboxPublisher := event.NewDefaultOutboxPublisher(bus, broker)
+	relayConfig := configConfig.Outbox
 	relay := outbox.NewRelay(bunDB, repository, outboxPublisher, relayConfig)
-	appApp := newApp(httpServer, configConfig, module, slogLogger, client, grpcServer, api, broker, relay)
+	centrifugenodeInit := centrifugenode.Setup(node, serveMux, manager)
+	appApp := newApp(httpServer, configConfig, module, init, slogLogger, client, grpcServer, api, broker, relay, node, centrifugenodeInit)
 	return appApp
 }
 
 // initialize.go:
 
-func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *slog.Logger, _ *redis2.Client, grpcSrv *grpc2.Server, api huma2.API, broker *amqp.Broker, relay *outbox.Relay) *app.App {
-	return app.New(httpSrv, cfg, grpcSrv, api, broker, relay)
-}
-
-func provideOutboxPublisher(broker *amqp.Broker, _ event.Bus) *event.OutboxPublisher {
-	return event.NewOutboxPublisher(broker, event.ExchangeEvents)
-}
-
-func provideRelayConfig(cfg *config.Config) outbox.RelayConfig {
-	return cfg.Outbox
+func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ middleware.Init, _ *slog.Logger, _ *redis2.Client, grpcSrv *grpc2.Server, api huma2.API, broker *amqp.Broker, relay *outbox.Relay, centrifugeNode *centrifuge2.Node, _ centrifugenode.Init) *app.App {
+	return app.New(httpSrv, cfg, grpcSrv, api, broker, relay, centrifugeNode)
 }

@@ -3,17 +3,18 @@
 package user
 
 import (
-	sharedmw "starter-boilerplate/internal/shared/middleware"
+	"starter-boilerplate/internal/shared/centrifugenode"
+	"starter-boilerplate/internal/shared/middleware"
+	"starter-boilerplate/internal/user/app/service"
 	"starter-boilerplate/internal/user/app/usecase"
-	"starter-boilerplate/internal/user/domain/repository"
+	"starter-boilerplate/internal/user/infra/persistence"
 	"starter-boilerplate/internal/user/transport/consumer"
 	usercontract "starter-boilerplate/internal/user/transport/contract"
 	"starter-boilerplate/internal/user/transport/handler"
 	pkgamqp "starter-boilerplate/pkg/amqp"
+	pkgdb "starter-boilerplate/pkg/db"
 	pkgjwt "starter-boilerplate/pkg/jwt"
 	"starter-boilerplate/pkg/outbox"
-
-	"starter-boilerplate/internal/user/app/service"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/wire"
@@ -23,12 +24,14 @@ import (
 
 type Module struct{}
 
-func NewModule(_ handler.HandlersInit, _ usercontract.Init, _ consumer.Init) Module {
+func NewModule(_ handler.HandlersInit, _ usercontract.Init, _ consumer.Init, _ consumer.BridgeInit) Module {
 	return Module{}
 }
 
-func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager, _ sharedmw.Init, _ repository.UserRepository, _ repository.ProfileRepository, _ outbox.Bus, _ *pkgamqp.Broker) Module {
+func InitializeUserModule(api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager, _ *bun.DB, _ outbox.Bus, _ *pkgamqp.Broker, _ pkgdb.UoW, _ *centrifugenode.Publisher, _ middleware.Init) Module {
 	wire.Build(
+		persistence.NewUserRepository,
+		persistence.NewProfileRepository,
 		service.NewUserService,
 		service.NewTokenService,
 		usecase.NewLoginUseCase,
@@ -46,6 +49,8 @@ func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pk
 		usercontract.SetupUserContract,
 		consumer.NewProfileUpdaterConsumer,
 		consumer.SetupConsumers,
+		consumer.NewBridgeConsumer,
+		consumer.SetupBridgeConsumer,
 		NewModule,
 	)
 	return Module{}

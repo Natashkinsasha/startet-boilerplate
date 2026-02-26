@@ -1,9 +1,9 @@
 package consumer
 
 import (
-	amqp091 "github.com/rabbitmq/amqp091-go"
-
 	pkgamqp "starter-boilerplate/pkg/amqp"
+
+	amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
 func Setup(conn *amqp091.Connection, cfg pkgamqp.AMQPConfig) *pkgamqp.Broker {

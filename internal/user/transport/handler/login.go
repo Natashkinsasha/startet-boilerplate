@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"net"
 	"net/http"
 
 	"starter-boilerplate/internal/user/app/usecase"
@@ -11,10 +12,29 @@ import (
 )
 
 type loginInput struct {
-	Body struct {
+	IP        string `json:"-"`
+	UserAgent string `json:"-"`
+	Body      struct {
 		Email    string `json:"email" required:"true" format:"email"`
 		Password string `json:"password" required:"true" minLength:"6"`
 	}
+}
+
+func (i *loginInput) Resolve(ctx huma.Context) []error {
+	if ip := ctx.Header("X-Forwarded-For"); ip != "" {
+		i.IP = ip
+	} else if ip := ctx.Header("X-Real-IP"); ip != "" {
+		i.IP = ip
+	} else {
+		host, _, err := net.SplitHostPort(ctx.RemoteAddr())
+		if err != nil {
+			host = ctx.RemoteAddr()
+		}
+		i.IP = host
+	}
+
+	i.UserAgent = ctx.Header("User-Agent")
+	return nil
 }
 
 type LoginHandler struct {
@@ -36,7 +56,7 @@ func (h *LoginHandler) Register(api huma.API) {
 }
 
 func (h *LoginHandler) handle(ctx context.Context, input *loginInput) (*tokenOutput, error) {
-	pair, err := h.loginUC.Execute(ctx, input.Body.Email, input.Body.Password)
+	pair, err := h.loginUC.Execute(ctx, input.Body.Email, input.Body.Password, input.IP, input.UserAgent)
 	if err != nil {
 		return nil, err
 	}

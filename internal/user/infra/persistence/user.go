@@ -67,6 +67,15 @@ func (r *userRepository) Update(ctx context.Context, u *model.User) error {
 	return err
 }
 
+func (r *userRepository) UpdatePassword(ctx context.Context, id, hash string) error {
+	_, err := pkgdb.Conn(ctx, r.db).NewUpdate().
+		Model((*userModel)(nil)).
+		Set("password_hash = ?", hash).
+		Where("id = ?", id).
+		Exec(ctx)
+	return err
+}
+
 func toEntity(m *userModel) *model.User {
 	return &model.User{
 		ID:           m.ID,

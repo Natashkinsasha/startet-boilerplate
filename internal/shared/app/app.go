@@ -13,32 +13,35 @@ import (
 	pkgamqp "starter-boilerplate/pkg/amqp"
 	"starter-boilerplate/pkg/outbox"
 
+	"github.com/centrifugal/centrifuge"
 	gohuma "github.com/danielgtaylor/huma/v2"
 	"golang.org/x/sync/errgroup"
 	gogrpc "google.golang.org/grpc"
 )
 
 type App struct {
-	HTTPServer *http.Server
-	GRPCServer *gogrpc.Server
-	Config     *config.Config
-	Api        gohuma.API
-	broker     *pkgamqp.Broker
-	relay      *outbox.Relay
-	ready      chan struct{}
-	startErr   chan error
+	HTTPServer     *http.Server
+	GRPCServer     *gogrpc.Server
+	Config         *config.Config
+	Api            gohuma.API
+	broker         *pkgamqp.Broker
+	relay          *outbox.Relay
+	centrifugeNode *centrifuge.Node
+	ready          chan struct{}
+	startErr       chan error
 }
 
-func New(httpSrv *http.Server, cfg *config.Config, grpcSrv *gogrpc.Server, api gohuma.API, broker *pkgamqp.Broker, relay *outbox.Relay) *App {
+func New(httpSrv *http.Server, cfg *config.Config, grpcSrv *gogrpc.Server, api gohuma.API, broker *pkgamqp.Broker, relay *outbox.Relay, centrifugeNode *centrifuge.Node) *App {
 	return &App{
-		HTTPServer: httpSrv,
-		GRPCServer: grpcSrv,
-		Config:     cfg,
-		Api:        api,
-		broker:     broker,
-		relay:      relay,
-		ready:      make(chan struct{}),
-		startErr:   make(chan error, 1),
+		HTTPServer:     httpSrv,
+		GRPCServer:     grpcSrv,
+		Config:         cfg,
+		Api:            api,
+		broker:         broker,
+		relay:          relay,
+		centrifugeNode: centrifugeNode,
+		ready:          make(chan struct{}),
+		startErr:       make(chan error, 1),
 	}
 }
 
@@ -101,6 +104,16 @@ func (a *App) Run(ctx context.Context) error {
 		return a.relay.Run(gCtx)
 	})
 
+	if a.centrifugeNode != nil {
+		g.Go(func() error {
+			if err := a.centrifugeNode.Run(); err != nil {
+				return fmt.Errorf("centrifuge node: %w", err)
+			}
+			<-gCtx.Done()
+			return nil
+		})
+	}
+
 	g.Go(func() error {
 		<-gCtx.Done()
 		return a.shutdown()
@@ -119,6 +132,16 @@ func (a *App) shutdown() error {
 	defer cancel()
 
 	var g errgroup.Group
+
+	if a.centrifugeNode != nil {
+		g.Go(func() error {
+			if err := a.centrifugeNode.Shutdown(ctx); err != nil {
+				return fmt.Errorf("centrifuge shutdown: %w", err)
+			}
+			slog.Info("centrifuge node stopped")
+			return nil
+		})
+	}
 
 	g.Go(func() error {
 		if err := a.HTTPServer.Shutdown(ctx); err != nil {

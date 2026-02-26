@@ -43,7 +43,7 @@ func (h *GetUserHandler) Register(api huma.API) {
 }
 
 func (h *GetUserHandler) handle(ctx context.Context, input *getUserInput) (*getUserOutput, error) {
-	u, err := h.uc.Execute(middleware.NewUserCtx(ctx), input.ID)
+	u, err := h.uc.Execute(middleware.NewAuthCtx(ctx), input.ID)
 	if err != nil {
 		return nil, err
 	}

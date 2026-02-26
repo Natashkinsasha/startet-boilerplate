@@ -13,9 +13,10 @@ Go starter project for bootstrapping new services.
 | ORM            | `github.com/uptrace/bun` (PostgreSQL) |
 | Cache          | `github.com/redis/go-redis/v9`        |
 | Message broker | `github.com/rabbitmq/amqp091-go` (RabbitMQ) |
+| Realtime       | `github.com/centrifugal/centrifuge`   |
 | Configuration  | `gopkg.in/yaml.v3`                    |
 | Migrations     | `bun/migrate`                         |
-| Logging        | `go.uber.org/zap`                     |
+| Logging        | `log/slog` (stdlib)                   |
 | Authentication | `github.com/golang-jwt/jwt/v5`        |
 | gRPC           | `google.golang.org/grpc` + `protobuf` |
 | DI             | `github.com/google/wire`              |
@@ -47,18 +48,24 @@ starter-boilerplate/
 │   │   ├── errs/
 │   │   │   └── errs.go      # project-specific sentinel errors (uses pkg/apperror.New)
 │   │   ├── server/
-│   │   │   └── setup.go     # SetupMux() → *http.ServeMux; SetupHTTPServer() → *http.Server
+│   │   │   ├── setup.go     # SetupMux() → *http.ServeMux; SetupHTTPServer() → *http.Server
+│   │   │   └── wire.go      # ProviderSet
+│   │   ├── centrifugenode/
+│   │   │   ├── publisher.go # NewPublisher — publishes to Centrifuge channels
+│   │   │   ├── setup.go     # Setup(node, mux, jwtManager) → Init
+│   │   │   └── wire.go      # ProviderSet
 │   │   ├── huma/
 │   │   │   ├── setup.go     # Setup(*http.ServeMux, AppConfig) → huma.API; error sanitization
 │   │   │   └── spec.go      # GenerateSpecFile(huma.API) — writes docs/swagger.json
 │   │   ├── middleware/
-│   │   │   ├── setup.go     # Setup(*http.Server, huma.API, *jwt.Manager, *UserLoaderCreator) → Init
+│   │   │   ├── setup.go     # Setup(*http.Server, huma.API, *jwt.Manager) → Init
 │   │   │   ├── auth.go      # NewAuthMiddleware, AuthCtx (claims with sync.Once)
 │   │   │   ├── role.go      # NewRoleMiddleware — role-based access control
-│   │   │   ├── user.go      # NewUserLoaderMiddleware, UserCtx (lazy user loading)
 │   │   │   ├── limiter.go   # NewLimiterMiddleware — per-IP rate limiting
 │   │   │   ├── logger.go    # newLoggerMiddleware — request logging
 │   │   │   └── requestid.go # NewRequestIDMiddleware — X-Request-ID header
+│   │   ├── consumer/
+│   │   │   └── setup.go     # Setup(conn, amqpConfig) → *pkgamqp.Broker
 │   │   ├── logger/
 │   │   │   └── logger.go    # LoggerConfig; SetupLogger(LoggerConfig) → *slog.Logger
 │   │   └── jwt/
@@ -75,6 +82,7 @@ starter-boilerplate/
 │       │   │   └── profile.go         # ProfileRepository (interface)
 │       │   └── event/
 │       │       ├── user_created.go      # UserCreatedEvent (tag: profile)
+│       │       ├── user_logged_in.go    # UserLoggedInEvent
 │       │       └── password_changed.go  # PasswordChangedEvent (tag: profile)
 │       ├── app/
 │       │   ├── service/
@@ -100,7 +108,8 @@ starter-boilerplate/
 │       │   │   └── types.go           # tokenOutput
 │       │   ├── consumer/
 │       │   │   ├── setup.go              # SetupConsumers() — registers all AMQP consumers
-│       │   │   └── profile_updater.go    # ProfileUpdaterConsumer — AMQP wiring, delegates to ProfileService
+│       │   │   ├── profile_updater.go    # ProfileUpdaterConsumer — AMQP wiring, delegates to ProfileService
+│       │   │   └── centrifuge_bridge.go  # BridgeConsumer — forwards events to Centrifuge channels
 │       │   └── contract/
 │       │       └── user.go          # gRPC Contract, SetupUserContract(), GetUser()
 │       ├── infra/
@@ -118,20 +127,32 @@ starter-boilerplate/
 │   │   └── consumer.go      # Consumer, ConsumerConfig, TypedHandler[T] — reusable consumer
 │   ├── apperror/
 │   │   └── error.go         # AppError type, New(), Wrap() — generic error with HTTP status
+│   ├── centrifuge/
+│   │   └── setup.go         # Config; Setup(Config, *goredis.Client, *slog.Logger) → *centrifuge.Node
 │   ├── db/
-│   │   └── setup.go         # DBConfig; Setup(DBConfig, *slog.Logger) → *bun.DB
+│   │   ├── setup.go         # DBConfig; Setup(DBConfig, *slog.Logger) → *bun.DB
+│   │   ├── tx_context.go    # WithTx, TxFromCtx, Conn — tx-in-context pattern
+│   │   ├── uow.go           # UoW interface, UnitOfWork — transactional execution
+│   │   └── wire.go          # ProviderSet
 │   ├── event/
 │   │   ├── bus.go           # Event interface, Bus interface — domain event abstractions
-│   │   └── amqp.go          # AMQPBus — Bus implementation backed by pkg/amqp
+│   │   ├── amqp.go          # AMQPBus — Bus implementation backed by pkg/amqp
+│   │   └── wire.go          # ProviderSet + NewDefaultOutboxPublisher
 │   ├── grpc/
 │   │   ├── setup.go         # GRPCConfig; Setup(GRPCConfig, *slog.Logger) → *grpc.Server
 │   │   └── error_interceptor.go # ErrorInterceptor — converts AppError → gRPC status
 │   ├── jwt/
 │   │   └── manager.go       # Manager, Claims, Config; token generation and validation
 │   ├── logger/
-│   │   └── setup.go         # Logger (= zap.Logger); SetupLogger(format, level, stacktraceLevel); NewNop()
+│   │   └── setup.go         # Logger; SetupLogger(format, level, stacktraceLevel); NewNop()
 │   ├── migrate/
 │   │   └── runner.go        # Runner; wraps bun/migrate.Migrator
+│   ├── outbox/
+│   │   ├── model.go         # Entry — outbox table row
+│   │   ├── bus.go           # OutboxBus — Bus impl that inserts into outbox table
+│   │   ├── repository.go    # Repository — CRUD for outbox entries
+│   │   ├── relay.go         # Relay — polls outbox and publishes via Publisher
+│   │   └── wire.go          # ProviderSet
 │   ├── redis/
 │   │   └── setup.go         # RedisConfig; Setup(RedisConfig, *slog.Logger) → *goredis.Client
 │   └── testcontainer/
@@ -152,7 +173,9 @@ starter-boilerplate/
 │   │   ├── api_test.go      # E2E tests — API endpoints
 │   │   ├── auth_test.go     # E2E tests — auth flow
 │   │   ├── user_test.go     # E2E tests — user endpoints
-│   │   └── testdata/fixtures/users.yml
+│   │   └── testdata/fixtures/
+│   │       ├── users.yml     # user fixture data
+│   │       └── outbox.yml    # empty — ensures outbox table is truncated between tests
 │   └── suite/
 │       └── functional_suite.go  # shared test suite setup
 ├── env/
@@ -222,7 +245,7 @@ Adding a new event handler = one new method on the service + one `sharedevent.Ro
 
 Events live in `domain/event/` and implement `pkg/event.Event` (requires `EventName() string`). Events optionally implement `event.Taggable` (`Tags() []string`) for headers-exchange routing.
 
-Use cases publish events via `event.Bus`. Consumers receive and route them via `shared/event.Router`.
+Use cases publish events via `outbox.Bus`, which inserts them into the outbox table within the current transaction. The `outbox.Relay` polls unpublished entries and forwards them to AMQP. Consumers receive and route them via `shared/event.Router`.
 
 ### Concurrency: JSONB updates
 
@@ -332,6 +355,8 @@ pkg/db/setup.go                  → type DBConfig struct
 pkg/redis/setup.go               → type RedisConfig struct
 pkg/amqp/config.go               → type AMQPConfig struct
 pkg/grpc/setup.go                → type GRPCConfig struct
+pkg/outbox/relay.go              → type RelayConfig struct
+pkg/centrifuge/setup.go          → type Config struct
 internal/shared/jwt/jwt.go       → type JWTConfig struct
 internal/shared/logger/logger.go → type LoggerConfig struct
 internal/shared/config/setup.go  → type Config struct  (aggregates all)
@@ -357,13 +382,15 @@ type AppConfig struct {
 }
 
 type Config struct {
-    App    AppConfig
-    Logger sharedlogger.LoggerConfig
-    DB     pkgdb.DBConfig
-    Redis  pkgredis.RedisConfig
-    JWT    sharedjwt.JWTConfig
-    GRPC   pkggrpc.GRPCConfig
-    AMQP   pkgamqp.AMQPConfig
+    App        AppConfig
+    Logger     sharedlogger.LoggerConfig
+    DB         pkgdb.DBConfig
+    Redis      pkgredis.RedisConfig
+    JWT        sharedjwt.JWTConfig
+    GRPC       pkggrpc.GRPCConfig
+    AMQP       pkgamqp.AMQPConfig
+    Outbox     outbox.RelayConfig
+    Centrifuge pkgcentrifuge.Config
 }
 ```
 
@@ -412,9 +439,8 @@ type JWTConfig struct {
 ```go
 // internal/shared/logger/logger.go
 type LoggerConfig struct {
-    Format          string `yaml:"format"`           // "json" | "console"
-    Level           string `yaml:"level"`            // "debug" | "info" | "warn" | "error"
-    StacktraceLevel string `yaml:"stacktrace_level"` // "debug" | "info" | "warn" | "error" | "off"
+    Format string `yaml:"format"` // "json" | "console"
+    Level  string `yaml:"level"`  // "debug" | "info" | "warn" | "error"
 }
 ```
 
@@ -482,6 +508,27 @@ If `logger.level` is missing or invalid, the format default is used:
 
 ## Wire — DI pattern
 
+### ProviderSets
+
+Each package exports a `ProviderSet` variable in `wire.go`, grouping its constructors and bindings:
+
+```go
+// pkg/db/wire.go
+var ProviderSet = wire.NewSet(Setup, NewUnitOfWork, wire.Bind(new(UoW), new(*UnitOfWork)))
+
+// pkg/outbox/wire.go
+var ProviderSet = wire.NewSet(NewRepository, NewOutboxBus, wire.Bind(new(Bus), new(*OutboxBus)), NewRelay)
+
+// pkg/event/wire.go
+var ProviderSet = wire.NewSet(NewEventBus, NewDefaultOutboxPublisher, wire.Bind(new(outbox.Publisher), new(*OutboxPublisher)))
+
+// internal/shared/server/wire.go
+var ProviderSet = wire.NewSet(SetupMux, SetupHTTPServer)
+
+// internal/shared/centrifugenode/wire.go
+var ProviderSet = wire.NewSet(NewPublisher, Setup)
+```
+
 ### Application level (`internal/initialize.go`)
 
 ```go
@@ -489,30 +536,35 @@ If `logger.level` is missing or invalid, the format default is used:
 
 package internal
 
-func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ *slog.Logger, _ *goredis.Client, _ *amqp091.Connection, _ *pkgamqp.Publisher, grpcSrv *gogrpc.Server, api gohuma.API, consumerRunner consumer.Runner) *app.App {
-    consumers := []func(ctx context.Context) error{func(ctx context.Context) error(consumerRunner)}
-    return app.New(httpSrv, cfg, grpcSrv, api, consumers)
+func newApp(httpSrv *http.Server, cfg *config.Config, _ user.Module, _ middleware.Init,
+    _ *slog.Logger, _ *goredis.Client, grpcSrv *gogrpc.Server, api gohuma.API,
+    broker *pkgamqp.Broker, relay *outbox.Relay, centrifugeNode *gocentrifuge.Node,
+    _ centrifugenode.Init) *app.App {
+    return app.New(httpSrv, cfg, grpcSrv, api, broker, relay, centrifugeNode)
 }
 
 func InitializeApp(ctx context.Context) *app.App {
     wire.Build(
         config.SetupConfig,
         logger.SetupLogger,
-        wire.FieldsOf(new(*config.Config), "App", "Logger", "DB", "JWT", "Redis", "GRPC", "AMQP"),
-        db.Setup,
+        wire.FieldsOf(new(*config.Config), "App", "Logger", "DB", "JWT", "Redis", "GRPC", "AMQP", "Outbox", "Centrifuge"),
+
+        pkgdb.ProviderSet,
         redis.Setup,
         pkgamqp.Setup,
-        pkgamqp.NewPublisher,
-        event.NewEventBus,
-        server.SetupMux,
-        server.SetupHTTPServer,
+        server.ProviderSet,
         huma.Setup,
         pkggrpc.Setup,
         sharedjwt.NewJWTManager,
+
+        event.ProviderSet,
+        outbox.ProviderSet,
+
+        pkgcentrifuge.Setup,
+        centrifugenode.ProviderSet,
+
         middleware.Setup,
-
-        consumer.SetupConsumers,
-
+        sharedconsumer.Setup,
         user.InitializeUserModule,
 
         newApp,
@@ -521,7 +573,7 @@ func InitializeApp(ctx context.Context) *app.App {
 }
 ```
 
-`newApp` is a thin Wire wrapper — it accepts unused dependencies (`_ user.Module`, `_ *slog.Logger`, `_ *goredis.Client`, `_ *amqp091.Connection`, `_ *pkgamqp.Publisher`) to force Wire to create them (side-effect ordering), then delegates to `app.New` with only the needed parameters.
+`newApp` is a thin Wire wrapper — it accepts unused dependencies (`_ user.Module`, `_ middleware.Init`, `_ *slog.Logger`, `_ *goredis.Client`, `_ centrifugenode.Init`) to force Wire to create them (side-effect ordering), then delegates to `app.New` with only the needed parameters.
 
 `wire.FieldsOf` extracts fields from `*Config` and exposes them as individual providers.
 
@@ -538,14 +590,17 @@ package user
 
 type Module struct{} // Wire marker: all handlers have been set up
 
-func NewModule(_ handler.HandlersInit, _ usercontract.Init, _ consumer.Init) Module {
+func NewModule(_ handler.HandlersInit, _ usercontract.Init, _ consumer.Init, _ consumer.BridgeInit) Module {
     return Module{}
 }
 
-func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager,
-    _ sharedmw.Init, _ repository.UserRepository, _ repository.ProfileRepository,
-    _ event.Bus, _ *pkgamqp.Broker) Module {
+func InitializeUserModule(api huma.API, grpcSrv *gogrpc.Server, _ *pkgjwt.Manager,
+    _ *bun.DB, _ outbox.Bus, _ *pkgamqp.Broker, _ pkgdb.UoW,
+    _ *centrifugenode.Publisher, _ middleware.Init) Module {
     wire.Build(
+        // persistence
+        persistence.NewUserRepository,
+        persistence.NewProfileRepository,
         // services
         service.NewUserService,
         service.NewTokenService,
@@ -568,6 +623,8 @@ func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pk
         // consumers
         consumer.NewProfileUpdaterConsumer,
         consumer.SetupConsumers,
+        consumer.NewBridgeConsumer,
+        consumer.SetupBridgeConsumer,
 
         NewModule,
     )
@@ -577,9 +634,9 @@ func InitializeUserModule(_ *bun.DB, api huma.API, grpcSrv *gogrpc.Server, _ *pk
 
 `NewModule` is a Wire dependency sink — it ensures all handlers, contracts, and consumers are created.
 
-Wire constructors are grouped by layer: **services → usecases → handlers → consumers**. This grouping is a convention — Wire resolves dependencies by type, not by order.
+Wire constructors are grouped by layer: **persistence → services → usecases → handlers → consumers**. This grouping is a convention — Wire resolves dependencies by type, not by order.
 
-`InitializeUserModule` accepts `_ sharedmw.Init` to guarantee middleware is installed before handlers are registered. Repositories and infrastructure (`event.Bus`, `*pkgamqp.Broker`) are accepted as parameters provided externally by the application-level injector.
+`InitializeUserModule` accepts `_ middleware.Init` to guarantee middleware is installed before handlers are registered (huma v2 captures middleware at handler registration time). Infrastructure dependencies (`outbox.Bus`, `*pkgamqp.Broker`, `pkgdb.UoW`, etc.) are accepted as parameters provided externally by the application-level injector.
 
 ### Code generation
 
@@ -636,25 +693,24 @@ The public API is limited to `Manager`, `Claims`, `Config`, and their methods.
 
 ## pkg/logger
 
-Thin wrapper over `go.uber.org/zap`.
+Thin wrapper over `log/slog` (stdlib).
 
 ```go
-type Logger = zap.Logger  // type alias, not a new type
+type Logger = slog.Logger  // type alias, not a new type
 
-func SetupLogger(format, level, stacktraceLevel string) *Logger
+func SetupLogger(format, level string) *Logger
 func NewNop() *Logger  // for tests
 ```
 
 `format` behaviour:
-- `"json"` → `zap.NewProductionConfig()` (default level: `info`)
-- anything else → `zap.NewDevelopmentConfig()` with colour output (default level: `debug`)
+- `"json"` → `slog.NewJSONHandler` (structured JSON to stdout)
+- anything else → `slog.NewTextHandler` (human-readable to stdout)
 
-`level` overrides the format default. An invalid value is silently ignored.
-
-`stacktraceLevel` controls which log levels include stacktraces:
-- `"off"` → disables stacktraces entirely
-- `""` (empty) → keeps format defaults
-- `"warn"`, `"error"`, etc. → sets custom stacktrace threshold
+`level` parsing:
+- `"debug"` → `slog.LevelDebug`
+- `"warn"` / `"warning"` → `slog.LevelWarn`
+- `"error"` → `slog.LevelError`
+- default → `slog.LevelInfo`
 
 ---
 
@@ -736,6 +792,19 @@ type UserCreatedEvent struct {
 
 func (UserCreatedEvent) EventName() string { return UserCreated }
 func (UserCreatedEvent) Tags() []string    { return []string{"profile"} }
+```
+
+```go
+// internal/user/domain/event/user_logged_in.go
+const UserLoggedIn = "user.logged_in"
+
+type UserLoggedInEvent struct {
+    UserID    string `json:"user_id"    validate:"required,uuid"`
+    IP        string `json:"ip"         validate:"required"`
+    UserAgent string `json:"user_agent" validate:"required"`
+}
+
+func (UserLoggedInEvent) EventName() string { return UserLoggedIn }
 ```
 
 ```go
@@ -824,15 +893,17 @@ package usecase
 type LoginUseCase struct {
     userService  service.UserService
     tokenService service.TokenService
+    bus          outbox.Bus
 }
 
-func NewLoginUseCase(us service.UserService, ts service.TokenService) *LoginUseCase
+func NewLoginUseCase(us service.UserService, ts service.TokenService, bus outbox.Bus) *LoginUseCase
 ```
 
-`Execute(ctx, email, password)` flow:
+`Execute(ctx, email, password, ip, userAgent)` flow:
 1. `userService.FindByEmail(ctx, email)` — find user
 2. `userService.CheckPassword(passwordHash, password)` — verify password via bcrypt
-3. `tokenService.IssueTokenPair(userID, role)` — generate access + refresh tokens
+3. `bus.Publish(ctx, UserLoggedInEvent{...})` — publish login event via outbox
+4. `tokenService.IssueTokenPair(userID, role)` — generate access + refresh tokens
 
 ```go
 // internal/user/app/usecase/refresh.go
@@ -858,18 +929,19 @@ package usecase
 type RegisterUseCase struct {
     userService  service.UserService
     tokenService service.TokenService
-    eventBus     event.Bus
+    bus          outbox.Bus
+    uow          db.UoW
 }
 
-func NewRegisterUseCase(us service.UserService, ts service.TokenService, eb event.Bus) *RegisterUseCase
+func NewRegisterUseCase(us service.UserService, ts service.TokenService, bus outbox.Bus, uow db.UoW) *RegisterUseCase
 ```
 
-`Execute(ctx, email, password)` flow:
+`Execute(ctx, email, password)` flow (wrapped in `uow.Do` transaction):
 1. `userService.FindByEmail(ctx, email)` — check email uniqueness → `ErrEmailAlreadyExists`
 2. `userService.HashPassword(password)` — hash via bcrypt
 3. Create `model.User{ID: uuid.New(), Email, PasswordHash, Role: RoleUser}`
 4. `userService.Create(ctx, user)` — persist user
-5. `eventBus.Publish(ctx, UserCreatedEvent{...})` — publish domain event to AMQP
+5. `bus.Publish(ctx, UserCreatedEvent{...})` — insert domain event into outbox (same tx)
 6. `tokenService.IssueTokenPair(userID, role)` — auto-login, return tokens
 
 ```go
@@ -894,19 +966,20 @@ package usecase
 
 type ChangePasswordUseCase struct {
     userService service.UserService
-    eventBus    event.Bus
+    bus         outbox.Bus
+    uow         db.UoW
 }
 
-func NewChangePasswordUseCase(us service.UserService, eb event.Bus) *ChangePasswordUseCase
+func NewChangePasswordUseCase(us service.UserService, bus outbox.Bus, uow db.UoW) *ChangePasswordUseCase
 ```
 
-`Execute(ctx middleware.AuthCtx, oldPassword, newPassword)` flow:
+`Execute(ctx middleware.AuthCtx, oldPassword, newPassword)` flow (wrapped in `uow.Do` transaction):
 1. `ctx.Claims()` → get userID
 2. `userService.FindByID(ctx, userID)` → load user → `ErrNotFound` if missing
 3. `userService.CheckPassword(user.PasswordHash, oldPassword)` → verify old password → `ErrInvalidCredentials`
 4. `userService.HashPassword(newPassword)` → hash new password
 5. `userService.UpdatePassword(ctx, userID, hash)` → persist
-6. `eventBus.Publish(ctx, PasswordChangedEvent{UserID})` → publish domain event
+6. `bus.Publish(ctx, PasswordChangedEvent{UserID})` → insert domain event into outbox (same tx)
 
 ### infra/persistence
 
@@ -922,7 +995,7 @@ type userModel struct {            // unexported, bun ORM model
     UpdatedAt    int64  `bun:"updated_at,notnull"`
 }
 
-type userRepository struct{ db *bun.DB }  // unexported
+type userRepository struct{}  // unexported, stateless — uses pkgdb.Conn(ctx) for queries
 func NewUserRepository(db *bun.DB) repository.UserRepository
 ```
 
@@ -1042,6 +1115,7 @@ POST /api/v1/auth/register
 POST /api/v1/auth/login
   Body:     { "email": string (format: email), "password": string (minLength: 6) }
   Response: { "access_token": string, "refresh_token": string }
+  Notes:    Publishes UserLoggedInEvent via outbox
 
 POST /api/v1/auth/refresh
   Body:     { "refresh_token": string }
@@ -1071,15 +1145,16 @@ Middleware is installed in `internal/shared/middleware/setup.go` in two layers:
 3. `Limiter` — per-IP rate limiting (100 req/min)
 4. `Auth` — validates Bearer token on endpoints with `bearerAuth` security
 5. `Role` — checks `requiredRoles` metadata on operations
-6. `UserLoader` — injects a lazy user loader into context for authenticated requests
 
 **HTTP-level** (wraps the entire `http.Handler`):
 - `WithCORS` — permissive CORS headers
 - `WithRecover` — panic recovery, returns 500 JSON
 
-### Typed context: AuthCtx / UserCtx
+**Important**: `middleware.Setup` must run before handler registration because huma v2 captures middleware at the time `huma.Register` is called. This ordering is enforced via Wire: `InitializeUserModule` accepts `_ middleware.Init` as a parameter.
 
-Use cases that require authentication accept typed context interfaces instead of raw `context.Context`:
+### Typed context: AuthCtx
+
+Use cases that require authentication accept the `AuthCtx` interface instead of raw `context.Context`:
 
 ```go
 // auth.go
@@ -1089,25 +1164,13 @@ type AuthCtx interface {
 }
 
 func NewAuthCtx(ctx context.Context) AuthCtx
-
-// user.go
-type UserCtx interface {
-    AuthCtx
-    User() (*service.AuthUser, error)  // lazy, memoized via sync.Once
-}
-
-func NewUserCtx(ctx context.Context) UserCtx
 ```
 
-This provides **compile-time safety**: a use case declares exactly what auth data it needs. `Claims()` and `User()` are lazily evaluated with `sync.Once` — no extraction happens until the method is called.
+This provides **compile-time safety**: a use case declares exactly what auth data it needs. `Claims()` is lazily evaluated with `sync.Once` — no extraction happens until the method is called.
 
-Handlers create the appropriate context:
+Handlers create the context:
 ```go
-// handler needing only claims
 h.uc.Execute(middleware.NewAuthCtx(ctx), ...)
-
-// handler needing full user
-h.uc.Execute(middleware.NewUserCtx(ctx), ...)
 ```
 
 ---
@@ -1181,12 +1244,34 @@ func main() {
     app := internal.InitializeApp(ctx)
 
     if err := app.Run(ctx); err != nil {
-        zap.L().Fatal("server error", zap.Error(err))
+        slog.Error("server error", slog.Any("error", err))
+        os.Exit(1)
     }
 }
 ```
 
-`app.Run(ctx)` starts HTTP and gRPC servers via `errgroup` and blocks until context cancellation. On shutdown it gracefully stops both servers in parallel with a configurable timeout (`ShutdownTimeout`).
+`app.Run(ctx)` starts HTTP, gRPC servers, AMQP consumers, outbox relay, and Centrifuge node via `errgroup` and blocks until context cancellation. On shutdown it gracefully stops all components with a configurable timeout (`ShutdownTimeout`).
+
+---
+
+## Outbox pattern
+
+Domain events are published reliably using the transactional outbox pattern (`pkg/outbox/`):
+
+1. **Use case** calls `bus.Publish(ctx, event)` inside a database transaction
+2. **`OutboxBus`** serializes the event and inserts an `Entry` row into the `outbox` table (same tx)
+3. **`Relay`** polls the outbox table on a configurable interval, fetches unpublished entries with `SELECT ... FOR UPDATE SKIP LOCKED`, publishes them to AMQP, and marks them as published — all within a single transaction
+4. If publishing fails, the relay stops at the first failure to preserve FIFO ordering
+
+```go
+// pkg/outbox/relay.go
+type RelayConfig struct {
+    PollInterval time.Duration `yaml:"poll_interval"` // default: 1s
+    BatchSize    int           `yaml:"batch_size"`    // default: 100
+}
+```
+
+The `outbox.Publisher` interface decouples the relay from the transport. The default implementation (`event.OutboxPublisher`) publishes to AMQP via `pkg/event`.
 
 ---
 
@@ -1270,6 +1355,8 @@ make test-integration
 ### Functional tests
 
 Functional (E2E) tests spin up a full HTTP server, PostgreSQL, Redis, and RabbitMQ containers via `testcontainers-go`, and load fixture data via `go-testfixtures`. They send real HTTP requests to all API endpoints.
+
+**Important**: `go-testfixtures` resets ALL PostgreSQL sequences to 10000 but only truncates tables that have fixture files. Any table with SERIAL/BIGSERIAL columns that receives INSERTs during tests must have a fixture file (even an empty `[]`) to ensure it gets truncated between tests. See `tests/functional/testdata/fixtures/outbox.yml`.
 
 ```bash
 make test-functional
@@ -1388,7 +1475,8 @@ proto/{subdomain}/{subdomain}.proto   →   gen/{subdomain}/*.pb.go
    ├── initialize.go       # //go:build wireinject — InitializeXxxModule
    └── wire_gen.go         # generated
    ```
-3. Declare `InitializeXxxModule` in `internal/{name}/initialize.go` with the required parameters
+3. Declare `InitializeXxxModule` in `internal/{name}/initialize.go` with the required parameters (accept `_ middleware.Init` to ensure middleware ordering)
 4. Add `{name}.InitializeXxxModule` to `wire.Build` in `internal/initialize.go`
 5. Add `_ {name}.Module` parameter to `newApp` to guarantee initialization
-6. Run `make wire`
+6. If the package has multiple providers, export a `ProviderSet` in `wire.go`
+7. Run `make wire`

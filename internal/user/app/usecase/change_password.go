@@ -3,8 +3,6 @@ package usecase
 import (
 	"context"
 
-	"github.com/uptrace/bun"
-
 	"starter-boilerplate/internal/shared/errs"
 	"starter-boilerplate/internal/shared/middleware"
 	"starter-boilerplate/internal/user/app/service"
@@ -16,11 +14,11 @@ import (
 type ChangePasswordUseCase struct {
 	userService service.UserService
 	bus         outbox.Bus
-	db          *bun.DB
+	uow         pkgdb.UoW
 }
 
-func NewChangePasswordUseCase(us service.UserService, bus outbox.Bus, db *bun.DB) *ChangePasswordUseCase {
-	return &ChangePasswordUseCase{userService: us, bus: bus, db: db}
+func NewChangePasswordUseCase(us service.UserService, bus outbox.Bus, uow pkgdb.UoW) *ChangePasswordUseCase {
+	return &ChangePasswordUseCase{userService: us, bus: bus, uow: uow}
 }
 
 func (uc *ChangePasswordUseCase) Execute(ctx middleware.AuthCtx, oldPassword, newPassword string) error {
@@ -43,7 +41,7 @@ func (uc *ChangePasswordUseCase) Execute(ctx middleware.AuthCtx, oldPassword, ne
 		return err
 	}
 
-	return pkgdb.RunInTx(ctx, uc.db, func(ctx context.Context) error {
+	return uc.uow.Do(ctx, func(ctx context.Context) error {
 		if err := uc.userService.UpdatePassword(ctx, userID, hash); err != nil {
 			return err
 		}

@@ -19,7 +19,7 @@ func NewRepository(db *bun.DB) *Repository {
 
 // Insert adds an entry to the outbox within the current tx (or fallback db).
 func (r *Repository) Insert(ctx context.Context, entry *Entry) error {
-	_, err := pkgdb.Conn(ctx, r.db).NewInsert().Model(entry).Exec(ctx)
+	_, err := pkgdb.Conn(ctx, r.db).NewInsert().Model(entry).ExcludeColumn("id").Exec(ctx)
 	return err
 }
 
